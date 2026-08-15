@@ -52,7 +52,12 @@ async function startCall() {
         statusText.textContent = "Connecting to AI Assistant...";
         
         // 2. Setup WebSocket Connection
-        ws = new WebSocket('ws://localhost:8000/ws/audio');
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        let wsHost = window.location.host || '127.0.0.1:8000';
+        if (wsHost.includes(':3000')) {
+            wsHost = wsHost.replace(':3000', ':8000');
+        }
+        ws = new WebSocket(`${wsProtocol}//${wsHost}/ws/audio`);
         
         ws.onopen = () => {
             isConnected = true;

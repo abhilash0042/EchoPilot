@@ -7,11 +7,16 @@ import site
 import json
 from dotenv import load_dotenv
 
+import wave
+from dotenv import load_dotenv
+
 load_dotenv()
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from faster_whisper import WhisperModel
+from openai import OpenAI
 
 from dialogue_manager import handle_turn, handle_confirmation
 from booking import BookingSession, BookingState
@@ -40,9 +45,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load whisper once at startup. "small" is a good speed/accuracy tradeoff
-# for slot-filling style short utterances. Use "base" if latency is too high.
-model = WhisperModel("small", device="cuda", compute_type="float16")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+
+if GROQ_API_KEY:
+    groq_client = OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=GROQ_API_KEY
+    )
+    print("[STT] Connected to Groq Cloud API (whisper-large-v3)")
+else:
+    groq_client = None
+
+# Fallback local whisper model
+try:
+    model = WhisperModel("small", device="cuda", compute_type="float16")
+    print("[STT] Local CUDA Faster-Whisper model loaded")
+except Exception as e:
+    print(f"[STT] CUDA Whisper failed ({e}), loading CPU Faster-Whisper model")
+    model = WhisperModel("small", device="cpu", compute_type="int8")
+
 
 SAMPLE_RATE = 16000
 FRAME_MS = 30  # webrtcvad requires 10/20/30ms frames
@@ -117,11 +138,16 @@ async def speak(websocket: WebSocket, session: AudioSession, text: str):
         await websocket.send_bytes(audio_bytes)
         # Note: We do NOT set assistant_speaking = False here anymore.
         # We wait for the 'playback_ended' signal from the frontend.
+    except WebSocketDisconnect:
+        session.assistant_speaking = False
     except Exception as e:
         print(f"TTS Error: {e}")
         session.assistant_speaking = False
         if not session.interrupted:
-            await websocket.send_json({"type": "status", "message": "listening"})
+            try:
+                await websocket.send_json({"type": "status", "message": "listening"})
+            except Exception:
+                pass
 
 
 @app.websocket("/ws/audio")
@@ -228,18 +254,44 @@ async def audio_socket(websocket: WebSocket):
                 session.user_speaking_start_time = 0
                 session.backchannel_played = False
 
-                segments, _ = model.transcribe(
-                    pcm_float,
-                    language="en",
-                    vad_filter=True,
-                    beam_size=5,
-                )
-                text = " ".join(seg.text.strip() for seg in segments).strip()
+                text = ""
+                if groq_client:
+                    try:
+                        wav_io = io.BytesIO()
+                        with wave.open(wav_io, 'wb') as wf:
+                            wf.setnchannels(1)
+                            wf.setsampwidth(2)
+                            wf.setframerate(16000)
+                            wf.writeframes(pcm.tobytes())
+                        wav_io.seek(0)
+                        wav_io.name = "audio.wav"
+
+                        transcription = groq_client.audio.transcriptions.create(
+                            file=wav_io,
+                            model="whisper-large-v3",
+                            language="en",
+                            prompt="Abhilash, Lumina, health clinic, checkup, booking, appointment",
+                        )
+                        text = transcription.text.strip()
+                    except Exception as e:
+                        print(f"Groq Whisper STT Error, falling back to local model: {e}")
+
+                if not text and model:
+                    pcm_float = pcm.astype(np.float32) / 32768.0
+                    segments, _ = model.transcribe(
+                        pcm_float,
+                        language="en",
+                        vad_filter=True,
+                        beam_size=5,
+                        initial_prompt="Abhilash, Lumina, health clinic, checkup, booking, appointment",
+                    )
+                    text = " ".join(seg.text.strip() for seg in segments).strip()
                 
                 # Filter Whisper hallucinations
                 hallucinations = ["thank you for watching", "subscribe to", "thanks for watching", "thank you.", "you.", "you", "please subscribe", "subscribe."]
                 if len(text) < 2 or text.lower() in hallucinations or "thank you for watching" in text.lower():
                     text = ""
+
 
                 if not text:
                     await websocket.send_json({"type": "status", "message": "listening"})
@@ -255,5 +307,10 @@ async def audio_socket(websocket: WebSocket):
 
                 await speak(websocket, session, reply_text)
 
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         print("Client disconnected")
+
+
+# Mount the frontend directory to serve the static UI at the root path '/'
+frontend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
+app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")

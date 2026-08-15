@@ -83,9 +83,14 @@ def handle_confirmation(session: BookingSession, user_text: str) -> str:
     conf = extract_confirmation(user_text)
     
     if conf == "yes":
-        save_booking(session.slots)
-        session.state = BookingState.BOOKED
-        reply = "You're all set! I've booked that for you. You'll get a confirmation message shortly. Is there anything else you need?"
+        result = save_booking(session.slots)
+        if result.get("success"):
+            session.state = BookingState.BOOKED
+            reply = "You're all set! I've booked that for you. You'll get a confirmation message shortly. Is there anything else you need?"
+        else:
+            session.state = BookingState.COLLECT_TIME
+            reply = f"Sorry, the slot at {session.slots.time} on {session.slots.date} is no longer available. What other time works for you?"
+            
         add_to_history("user", user_text)
         add_to_history("assistant", reply)
         return reply
