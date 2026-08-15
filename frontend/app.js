@@ -64,6 +64,9 @@ async function startCall() {
             console.log("WebSocket connected");
             
             // UI Transition
+            const heroSection = document.querySelector('.hero-section');
+            if (heroSection) heroSection.classList.add('in-call');
+            
             callActionArea.classList.add('hidden');
             callInterface.classList.remove('hidden');
             setTimeout(() => callInterface.classList.add('active'), 50);
@@ -263,6 +266,9 @@ function endCall() {
     }
     
     // UI Reset
+    const heroSection = document.querySelector('.hero-section');
+    if (heroSection) heroSection.classList.remove('in-call');
+
     callInterface.classList.remove('active');
     setTimeout(() => {
         callInterface.classList.add('hidden');
