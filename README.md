@@ -73,5 +73,5 @@ Contributions are welcome! Whether it's adding support for Twilio/SIP phone call
 
 ---
 <div align="center">
-  <i>Built with ❤️ for the future of conversational AI.</i>
+  <i>Built with ❤️ for the future of conversational Voice AI.</i>
 </div>
