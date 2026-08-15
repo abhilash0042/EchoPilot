@@ -246,23 +246,15 @@ body {
     max-height: 100px;
 }
 
-/* In-Call Layout Adjustments for Smooth Transition */
-.hero-section.in-call .badge {
-    opacity: 0.6;
-    margin-bottom: 0.75rem;
-    transform: scale(0.9);
-}
-
-.hero-section.in-call .hero-title {
-    font-size: 2.25rem;
-    margin-bottom: 0.5rem;
-}
-
+/* In-Call Layout Adjustments: Hide hero text so call card takes 100% center focus */
+.hero-section.in-call .badge,
+.hero-section.in-call .hero-title,
 .hero-section.in-call .hero-subtitle {
-    opacity: 0;
-    max-height: 0;
-    margin-bottom: 0;
-    overflow: hidden;
+    display: none !important;
+}
+
+.hero-section.in-call {
+    padding-top: 0.5rem;
 }
 
 /* --- Call Action Area --- */

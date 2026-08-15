@@ -95,9 +95,11 @@ class AudioSession:
         self.barge_in_speech_ms = 0
         self.interrupted = False
         
-        # Backchanneling state
+        # Backchanneling & Inactivity state
         self.user_speaking_start_time = 0
         self.backchannel_played = False
+        self.last_speech_or_prompt_time = time.time()
+        self.inactivity_check_count = 0
 
     def add_chunk(self, chunk: bytes):
         self.pcm_buffer.extend(chunk)
@@ -133,6 +135,7 @@ async def speak(websocket: WebSocket, session: AudioSession, text: str):
     session.assistant_speaking = True
     session.barge_in_speech_ms = 0
     session.interrupted = False
+    session.last_speech_or_prompt_time = time.time()
 
     await websocket.send_json({"type": "transcript", "text": text, "final": True, "speaker": "assistant"})
     await websocket.send_json({"type": "status", "message": "speaking"})
@@ -221,11 +224,12 @@ async def audio_socket(websocket: WebSocket):
                     session.barge_in_speech_ms = 0
                 continue
 
-            # --- Normal listening flow (bot not speaking) ---
             speaking_now = has_speech(pcm, window_ms=300)
             if speaking_now:
                 session.silence_ms = 0
                 session.last_frame_had_speech = True
+                session.last_speech_or_prompt_time = now
+                session.inactivity_check_count = 0
                 
                 if session.user_speaking_start_time == 0:
                     session.user_speaking_start_time = now
@@ -250,6 +254,22 @@ async def audio_socket(websocket: WebSocket):
                 # Only reset user speaking duration on sustained silence, not just a brief 150ms pause
                 if session.silence_ms >= 500:
                     session.user_speaking_start_time = 0
+
+            # --- 6-Second Inactivity Check ---
+            # If caller hasn't spoken at all for >6.5 seconds, check in gently instead of looping
+            if not session.last_frame_had_speech and (now - session.last_speech_or_prompt_time > 6.5):
+                if session.inactivity_check_count == 0:
+                    session.inactivity_check_count = 1
+                    session.last_speech_or_prompt_time = now
+                    check_in = "Are you there? Take your time, I'm here!"
+                    await speak(websocket, session, check_in)
+                    continue
+                elif session.inactivity_check_count == 1 and (now - session.last_speech_or_prompt_time > 8.0):
+                    session.inactivity_check_count = 2
+                    session.last_speech_or_prompt_time = now
+                    check_in = "Hello! Can you hear me okay? Just let me know whenever you're ready!"
+                    await speak(websocket, session, check_in)
+                    continue
 
             # User was talking, and has now gone quiet for long enough -> finalize
             if session.last_frame_had_speech and session.silence_ms >= SILENCE_MS_TO_FINALIZE:
