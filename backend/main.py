@@ -14,6 +14,7 @@ load_dotenv()
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 try:
     from faster_whisper import WhisperModel
 except ImportError:
