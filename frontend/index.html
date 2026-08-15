@@ -27,9 +27,10 @@
                 <span>Lumina Health</span>
             </div>
             <nav class="nav-links">
-                <a href="#" class="nav-link">Services</a>
-                <a href="#" class="nav-link">Doctors</a>
-                <a href="#" class="nav-link">Locations</a>
+                <button id="open-db-btn" class="nav-db-btn">
+                    <i class="ph-bold ph-database"></i>
+                    <span>Healthcare DB & Records</span>
+                </button>
             </nav>
         </header>
 
@@ -42,55 +43,265 @@
                     <p class="hero-subtitle">Experience instant, hassle-free booking. Just click call and speak naturally to our intelligent scheduling agent.</p>
                 </div>
                 
-                <!-- The Core Interaction Area -->
-                <div class="call-action-area">
-                    <button id="call-btn" class="call-btn pulse-anim">
-                        <i class="ph-fill ph-phone-call"></i>
-                        <span id="call-btn-text">Call AI Assistant</span>
-                    </button>
-                    <p class="status-text" id="status-text">Ready to connect.</p>
-                </div>
-
-                <!-- Call Interface (Hidden by default) -->
-                <div id="call-interface" class="glass-panel call-interface hidden">
-                    <div class="call-header">
-                        <div class="agent-profile">
-                            <div class="avatar-ring">
-                                <div class="avatar">
-                                    <i class="ph ph-robot"></i>
-                                </div>
-                            </div>
-                            <div class="agent-info">
-                            <h3>Lumina Assistant</h3>
-                            <div class="status-row">
-                                <span class="live-status"><span class="dot"></span> Connected</span>
-                                <span class="timer-dot">•</span>
-                                <span id="call-timer" class="call-timer">00:00</span>
-                            </div>
-                        </div>
-                        </div>
-                        <button id="end-call-btn" class="end-call-btn">
-                            <i class="ph-fill ph-phone-slash"></i>
+                <!-- Mode Switcher: Voice vs Text Chatbot -->
+                <div class="mode-switcher-container">
+                    <div class="mode-toggle">
+                        <button id="mode-voice-btn" class="mode-btn active">
+                            <i class="ph-fill ph-microphone"></i>
+                            <span>Voice Assistant</span>
+                        </button>
+                        <button id="mode-chat-btn" class="mode-btn">
+                            <i class="ph-fill ph-chat-teardrop-text"></i>
+                            <span>Interactive Chatbot</span>
                         </button>
                     </div>
+                </div>
 
-                    <div class="visualizer">
-                        <div class="bar"></div>
-                        <div class="bar"></div>
-                        <div class="bar"></div>
-                        <div class="bar"></div>
-                        <div class="bar"></div>
-                        <div class="bar"></div>
-                        <div class="bar"></div>
+                <!-- 1. Voice Mode Action Area -->
+                <div id="voice-mode-section">
+                    <div class="call-action-area">
+                        <button id="call-btn" class="call-btn pulse-anim">
+                            <i class="ph-fill ph-phone-call"></i>
+                            <span id="call-btn-text">Call AI Assistant</span>
+                        </button>
+                        <p class="status-text" id="status-text">Ready to connect.</p>
                     </div>
 
-                    <div class="transcript-area" id="transcript-area">
-                        <!-- Chat bubbles will be injected here by JS -->
+                    <!-- Call Interface (Hidden by default) -->
+                    <div id="call-interface" class="glass-panel call-interface hidden">
+                        <div class="call-header">
+                            <div class="agent-profile">
+                                <div class="avatar-ring">
+                                    <div class="avatar">
+                                        <i class="ph ph-robot"></i>
+                                    </div>
+                                </div>
+                                <div class="agent-info">
+                                    <h3>Lumina Assistant</h3>
+                                    <div class="status-row">
+                                        <span class="live-status"><span class="dot"></span> Connected</span>
+                                        <span class="timer-dot">•</span>
+                                        <span id="call-timer" class="call-timer">00:00</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button id="end-call-btn" class="end-call-btn">
+                                <i class="ph-fill ph-phone-slash"></i>
+                            </button>
+                        </div>
+
+                        <div class="visualizer">
+                            <div class="bar"></div>
+                            <div class="bar"></div>
+                            <div class="bar"></div>
+                            <div class="bar"></div>
+                            <div class="bar"></div>
+                            <div class="bar"></div>
+                            <div class="bar"></div>
+                        </div>
+
+                        <div class="transcript-area" id="transcript-area">
+                            <!-- Chat bubbles will be injected here by JS -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Text Chatbot Mode Container -->
+                <div id="chat-mode-section" class="hidden">
+                    <div class="glass-panel chat-interface">
+                        <div class="chat-header">
+                            <div class="agent-profile">
+                                <div class="avatar-ring">
+                                    <div class="avatar">
+                                        <i class="ph ph-robot"></i>
+                                    </div>
+                                </div>
+                                <div class="agent-info">
+                                    <h3>Lumina Health Chatbot</h3>
+                                    <div class="status-row">
+                                        <span class="live-status"><span class="dot"></span> Online & Ready</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button id="reset-chat-btn" class="btn-secondary" title="Start fresh conversation">
+                                <i class="ph-bold ph-arrow-clockwise"></i> New Chat
+                            </button>
+                        </div>
+
+                        <!-- Chat Messages Container -->
+                        <div class="chat-messages-area" id="chat-messages-area">
+                            <!-- Injected by JS -->
+                        </div>
+
+                        <!-- Quick Action Suggestion Chips -->
+                        <div class="chat-suggestions-area" id="chat-suggestions-area">
+                            <!-- Suggestion chips injected by JS -->
+                        </div>
+
+                        <!-- Chat Input Form -->
+                        <form class="chat-input-area" id="chat-form">
+                            <input type="text" id="chat-input" placeholder="Type a message (e.g., 'Book a checkup tomorrow at 10 AM')..." autocomplete="off" />
+                            <button type="submit" id="chat-send-btn" class="chat-send-btn" aria-label="Send message">
+                                <i class="ph-bold ph-paper-plane-right"></i>
+                            </button>
+                        </form>
                     </div>
                 </div>
 
             </div>
         </main>
+    </div>
+
+    <!-- Database Explorer Modal -->
+    <div id="db-modal" class="modal-overlay hidden">
+        <div class="glass-panel modal-container">
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <div class="modal-icon">
+                        <i class="ph-duotone ph-database"></i>
+                    </div>
+                    <div>
+                        <h2>Lumina Healthcare Database</h2>
+                        <p class="modal-subtitle">SQLite Relational Engine with Sensitive Hospital & Customer Records</p>
+                    </div>
+                </div>
+                <div class="modal-header-actions">
+                    <button id="reseed-db-btn" class="btn-secondary" title="Re-seed clean mock data">
+                        <i class="ph-bold ph-arrow-clockwise"></i> Reset Sample Data
+                    </button>
+                    <button id="close-db-btn" class="close-btn" title="Close modal">
+                        <i class="ph-bold ph-x"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Stats Bar -->
+            <div class="db-stats-bar" id="db-stats-bar">
+                <div class="stat-badge"><span class="stat-dot"></span> Status: <strong id="stat-status">Connected</strong></div>
+                <div class="stat-badge"><i class="ph ph-users"></i> Patients: <strong id="stat-patients">-</strong></div>
+                <div class="stat-badge"><i class="ph ph-calendar-check"></i> Bookings: <strong id="stat-appointments">-</strong></div>
+                <div class="stat-badge"><i class="ph ph-user-circle-gear"></i> Doctors: <strong id="stat-doctors">-</strong></div>
+                <div class="stat-badge"><i class="ph ph-phone"></i> Voice Calls: <strong id="stat-calls">-</strong></div>
+            </div>
+
+            <!-- Tabs Navigation -->
+            <div class="modal-tabs">
+                <button class="tab-btn active" data-tab="patients-tab"><i class="ph-fill ph-identification-card"></i> Patients & PHI (Sensitive)</button>
+                <button class="tab-btn" data-tab="appointments-tab"><i class="ph-fill ph-calendar"></i> Appointments</button>
+                <button class="tab-btn" data-tab="doctors-tab"><i class="ph-fill ph-stethoscope"></i> Doctors & Specialists</button>
+                <button class="tab-btn" data-tab="hospital-tab"><i class="ph-fill ph-buildings"></i> Hospital Licensing & Tax (Sensitive)</button>
+                <button class="tab-btn" data-tab="call-logs-tab"><i class="ph-fill ph-phone-call"></i> Voice Call Logs</button>
+            </div>
+
+            <!-- Modal Content Area -->
+            <div class="modal-body">
+                <!-- 1. Patients Tab -->
+                <div id="patients-tab" class="tab-pane active">
+                    <div class="table-info-banner">
+                        <i class="ph-fill ph-shield-warning"></i>
+                        <span><strong>Protected Health Information (PHI):</strong> Contains sensitive customer Medical Record Numbers (MRN), SSN (last 4), blood groups, medical allergies, active prescriptions, and confidential clinical notes.</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="data-table" id="patients-table">
+                            <thead>
+                                <tr>
+                                    <th>MRN</th>
+                                    <th>Patient Name</th>
+                                    <th>Phone / Contact</th>
+                                    <th>Blood & Allergies</th>
+                                    <th>Chronic Conditions</th>
+                                    <th>Prescriptions</th>
+                                    <th>Insurance & Policy</th>
+                                    <th>Confidential Notes</th>
+                                </tr>
+                            </thead>
+                            <tbody id="patients-tbody">
+                                <tr><td colspan="8" class="text-center">Loading patient records...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 2. Appointments Tab -->
+                <div id="appointments-tab" class="tab-pane">
+                    <div class="table-responsive">
+                        <table class="data-table" id="appointments-table">
+                            <thead>
+                                <tr>
+                                    <th>Booking Code</th>
+                                    <th>Patient Name</th>
+                                    <th>Doctor / Specialty</th>
+                                    <th>Service</th>
+                                    <th>Date & Time</th>
+                                    <th>Status</th>
+                                    <th>Source</th>
+                                    <th>Notes</th>
+                                </tr>
+                            </thead>
+                            <tbody id="appointments-tbody">
+                                <tr><td colspan="8" class="text-center">Loading appointments...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 3. Doctors Tab -->
+                <div id="doctors-tab" class="tab-pane">
+                    <div class="table-responsive">
+                        <table class="data-table" id="doctors-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Doctor Name</th>
+                                    <th>Department</th>
+                                    <th>Specialization</th>
+                                    <th>Medical License #</th>
+                                    <th>Fee</th>
+                                    <th>Available Schedule</th>
+                                    <th>Direct Contact</th>
+                                </tr>
+                            </thead>
+                            <tbody id="doctors-tbody">
+                                <tr><td colspan="8" class="text-center">Loading doctors catalogue...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 4. Hospital Info Tab -->
+                <div id="hospital-tab" class="tab-pane">
+                    <div class="table-info-banner">
+                        <i class="ph-fill ph-lock-key"></i>
+                        <span><strong>Confidential Hospital Licensing & Administration:</strong> Contains State/Federal Medical Council Registration, Federal Taxpayer ID (EIN), DEA Controlled Substance License, and HIPAA Compliance Audit Keys.</span>
+                    </div>
+                    <div id="hospital-details-cards" class="hospital-grid">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- 5. Call Logs Tab -->
+                <div id="call-logs-tab" class="tab-pane">
+                    <div class="table-responsive">
+                        <table class="data-table" id="call-logs-table">
+                            <thead>
+                                <tr>
+                                    <th>Session ID</th>
+                                    <th>Caller</th>
+                                    <th>Service</th>
+                                    <th>Duration</th>
+                                    <th>Status</th>
+                                    <th>Timestamp</th>
+                                    <th>Dialogue Transcript</th>
+                                </tr>
+                            </thead>
+                            <tbody id="call-logs-tbody">
+                                <tr><td colspan="7" class="text-center">Loading call logs...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="app.js"></script>
