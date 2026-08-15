@@ -246,11 +246,19 @@ body {
     max-height: 100px;
 }
 
+.hero-text-container {
+    transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    max-height: 500px;
+    opacity: 1;
+    overflow: hidden;
+}
+
 /* In-Call Layout Adjustments: Hide hero text so call card takes 100% center focus */
-.hero-section.in-call .badge,
-.hero-section.in-call .hero-title,
-.hero-section.in-call .hero-subtitle {
-    display: none !important;
+.hero-section.in-call .hero-text-container {
+    max-height: 0;
+    opacity: 0;
+    margin: 0;
+    transform: translateY(-20px);
 }
 
 .hero-section.in-call {
@@ -264,6 +272,20 @@ body {
     align-items: center;
     gap: 1.5rem;
     margin-bottom: 3rem;
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    max-height: 200px;
+    opacity: 1;
+    transform: scale(1);
+    overflow: hidden;
+}
+
+.call-action-area.hidden {
+    display: flex !important;
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.95);
+    max-height: 0;
+    margin-bottom: 0;
 }
 
 .call-btn {
@@ -337,12 +359,26 @@ body {
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
-    transition: var(--transition-smooth);
+    transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
     transform: translateY(20px) scale(0.96);
     opacity: 0;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 24px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+    max-height: 800px;
+    overflow: hidden;
+}
+
+.call-interface.hidden {
+    display: flex !important;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(20px) scale(0.96);
+    max-height: 0;
+    margin-top: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-width: 0;
 }
 
 .call-interface.active {
