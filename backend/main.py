@@ -14,9 +14,12 @@ load_dotenv()
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from faster_whisper import WhisperModel
+try:
+    from faster_whisper import WhisperModel
+except ImportError:
+    WhisperModel = None
 from openai import OpenAI
+
 
 from dialogue_manager import handle_turn, handle_confirmation
 from booking import BookingSession, BookingState
@@ -57,12 +60,18 @@ else:
     groq_client = None
 
 # Fallback local whisper model
-try:
-    model = WhisperModel("small", device="cuda", compute_type="float16")
-    print("[STT] Local CUDA Faster-Whisper model loaded")
-except Exception as e:
-    print(f"[STT] CUDA Whisper failed ({e}), loading CPU Faster-Whisper model")
-    model = WhisperModel("small", device="cpu", compute_type="int8")
+model = None
+if WhisperModel:
+    try:
+        model = WhisperModel("small", device="cuda", compute_type="float16")
+        print("[STT] Local CUDA Faster-Whisper model loaded")
+    except Exception as e:
+        try:
+            model = WhisperModel("small", device="cpu", compute_type="int8")
+            print("[STT] Local CPU Faster-Whisper model loaded")
+        except Exception as e2:
+            print(f"[STT] Local Whisper model skipped: {e2}")
+
 
 
 SAMPLE_RATE = 16000
