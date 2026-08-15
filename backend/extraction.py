@@ -26,20 +26,17 @@ else:
 
 FIELD_PROMPTS = {
     "service": """Extract the medical service/department the caller wants (e.g. "general checkup",
-"dentist", "cardiology", "eye checkup"). If unclear, return null.""",
+"dentist", "cardiology", "eye checkup", "డెంటిస్ట్", "జనరల్ చెకప్"). Understand both English and Telugu inputs. If unclear, return null.""",
 
-    "date": """Extract the appointment date the caller mentioned, and convert it to ISO format
-YYYY-MM-DD. Today's date is {today}. Handle relative terms like "tomorrow",
-"next Monday", "day after tomorrow". If unclear or not mentioned, return null.""",
+    "date": """Extract the appointment date mentioned by the caller and convert to ISO format YYYY-MM-DD.
+Today's date is {today}. Handle English and Telugu terms (e.g., "tomorrow", "next Monday", "రేపు" -> tomorrow, "ఎల్లుండి" -> day after tomorrow, "వచ్చే సోమవారం"). If unclear, return null.""",
 
     "time": """Extract the appointment time and convert to 24-hour HH:MM format.
-Handle terms like "morning" (assume 10:00), "afternoon" (assume 14:00), "evening" (assume 18:00),
-or specific times like "3pm" -> "15:00". If unclear, return null.""",
+Handle English and Telugu terms ("morning" / "ఉదయం" -> 10:00, "afternoon" / "మధ్యాహ్నం" -> 14:00, "evening" / "సాయంత్రం" -> 18:00, "10 o'clock" / "10 గంటలకు" -> 10:00). If unclear, return null.""",
 
-    "name": """Extract the caller's full name. If unclear or not mentioned, return null.""",
+    "name": """Extract the caller's full name. Handle Indian names in English or Telugu script. If unclear, return null.""",
 
-    "phone": """Extract the caller's phone number, digits only, no spaces or symbols.
-If unclear or not mentioned, return null.""",
+    "phone": """Extract the caller's phone number, digits only. Handle numbers spoken in English or Telugu (e.g. "తొమ్మిది" -> 9). If unclear, return null.""",
 }
 
 def extract_field(field_name: str, user_text: str) -> str | None:
@@ -63,7 +60,6 @@ No other text, no markdown formatting."""
             response_format={"type": "json_object"}
         )
         raw = result.choices[0].message.content.strip()
-        # Strip accidental markdown fences if the model adds them
         raw = raw.replace("```json", "").replace("```", "").strip()
         parsed = json.loads(raw)
         return parsed.get("value")
@@ -71,20 +67,22 @@ No other text, no markdown formatting."""
         print(f"Extraction error: {e}")
         return None
 
-# Shared persona that makes the AI sound like a real, friendly human
-PERSONA = """You are Lumina, a warm and friendly health clinic receptionist. 
-You talk like a real person — casual, kind, and helpful. Think of how a friendly 
-receptionist at a neighborhood clinic would talk to a patient they see regularly.
-Rules:
-- Use casual, natural language. Say things like "Sure thing!", "Got it!", "No worries!", "Awesome!"
-- NEVER sound robotic or scripted. No corporate jargon.
-- Keep responses SHORT — 1 to 2 sentences max. People hate long monologues on the phone.
-- If the caller says hi or makes small talk, engage with it naturally! Chat like a friend.
-- If they ask a random question (weather, sports, jokes), answer it genuinely and briefly.
-- If they say "thanks", "bye", "no thanks", or similar, respond warmly and say goodbye.
-- Do NOT use markdown, bullet points, or any formatting. Just speak naturally.
-- Do NOT repeat yourself word-for-word. Rephrase if you need to re-ask.
-- You are a REAL person having a REAL conversation. Act like it.
+# Shared persona that makes the AI sound like a warm, bilingual receptionist
+PERSONA = """You are Lumina, a warm, friendly receptionist at a health clinic in India.
+You talk like a real, kind human receptionist — casual, warm, and helpful.
+
+CRITICAL LANGUAGE RULE:
+- Automatically detect the caller's language.
+- If the caller speaks in TELUGU (or Telugu-English code-switching), reply in clear, natural TELUGU (using Telugu script or natural conversational Telugu).
+- If the caller speaks in ENGLISH, reply in natural Indian English.
+- Always match the caller's language choice throughout the conversation.
+
+General Rules:
+- Use casual, natural language.
+- Keep responses SHORT — 1 to 2 sentences max.
+- Handle Indian terms gracefully (e.g., "prepone", "ji", "sir", "madam").
+- If the caller makes small talk or greets in Telugu ("నమస్కారం", "ఎలా ఉన్నారు"), reply warmly in Telugu.
+- Never use markdown, bullet points, or complex formatting. Speak naturally.
 """
 
 # Conversation history for multi-turn context
@@ -93,7 +91,6 @@ _conversation_history: list[dict] = []
 def add_to_history(role: str, content: str):
     """Track conversation so the LLM has context of what was already said."""
     _conversation_history.append({"role": role, "content": content})
-    # Keep only the last 10 turns to avoid token overflow
     if len(_conversation_history) > 20:
         _conversation_history.pop(0)
         _conversation_history.pop(0)
@@ -105,17 +102,16 @@ def get_conversational_reply(user_text: str, current_prompt: str, allow_freeform
     if allow_freeform:
         system = f"""{PERSONA}
 The caller is chatting with you. There's no urgent question you need to ask right now.
-Just have a natural conversation. If they seem to want to book something or need help, 
-offer to assist. If they say bye or thanks, say a warm goodbye."""
+Just have a natural conversation. If they seem to want to book something or need help, offer to assist. If they say bye or thanks, say a warm goodbye."""
     else:
         system = f"""{PERSONA}
 The caller just said something that didn't directly answer your question.
 Your current goal is to ask them: "{current_prompt}"
-First, respond naturally to what they said — acknowledge it, react to it, be human about it.
-Then smoothly bring the conversation back to your question. Don't be pushy about it."""
+First, respond naturally to what they said in their language (Telugu or English).
+Then smoothly bring the conversation back to your question."""
 
     messages = [{"role": "system", "content": system}]
-    messages.extend(_conversation_history[-10:])  # recent context
+    messages.extend(_conversation_history[-10:])
     messages.append({"role": "user", "content": user_text})
 
     try:
@@ -126,7 +122,6 @@ Then smoothly bring the conversation back to your question. Don't be pushy about
             temperature=0.8,
         )
         reply = result.choices[0].message.content.strip()
-        # Strip any quotes the model might wrap the response in
         if reply.startswith('"') and reply.endswith('"'):
             reply = reply[1:-1]
         return reply
@@ -136,10 +131,12 @@ Then smoothly bring the conversation back to your question. Don't be pushy about
 
 def extract_confirmation(user_text: str) -> str | None:
     system = """A clinic receptionist just read out an appointment summary and asked the caller to confirm.
-Based on the caller's response, determine if they mean YES (confirm) or NO (reject/change).
-Examples of YES: "yes", "yeah", "yep", "sure", "sounds good", "perfect", "that's right", "go ahead", "book it"
-Examples of NO: "no", "nope", "wrong", "cancel", "change", "start over", "wait", "hold on", "not right"
-If it's clearly unrelated or ambiguous (like "what time does the clinic close?"), return null.
+Based on the caller's response in English or Telugu, determine if they mean YES (confirm) or NO (reject/change).
+
+Examples of YES: "yes", "yeah", "yep", "sure", "sounds good", "perfect", "that's right", "book it", "అవును", "హా", "సరే", "ఒకే", "అవునండి", "బుక్ చేయండి"
+Examples of NO: "no", "nope", "wrong", "cancel", "change", "start over", "wait", "వద్దు", "కాదు", "మార్చండి", "తప్పు"
+
+If it's clearly unrelated or ambiguous, return null.
 Respond with ONLY a JSON object: {"value": "yes"} or {"value": "no"} or {"value": null}."""
 
     try:
@@ -157,3 +154,4 @@ Respond with ONLY a JSON object: {"value": "yes"} or {"value": "no"} or {"value"
         return parsed.get("value")
     except:
         return None
+

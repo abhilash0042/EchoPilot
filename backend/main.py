@@ -279,8 +279,7 @@ async def audio_socket(websocket: WebSocket):
                         transcription = groq_client.audio.transcriptions.create(
                             file=wav_io,
                             model="whisper-large-v3",
-                            language="en",
-                            prompt="Abhilash, Lumina, health clinic, checkup, booking, appointment",
+                            prompt="Abhilash, Lumina, health clinic, checkup, booking, appointment, doctor, నమస్కారం, అపాయింట్మెంట్, చెకప్, రేపు, ఎల్లుండి, సాయంత్రం, ఉదయం",
                         )
                         text = transcription.text.strip()
                     except Exception as e:
@@ -290,10 +289,9 @@ async def audio_socket(websocket: WebSocket):
                     pcm_float = pcm.astype(np.float32) / 32768.0
                     segments, _ = model.transcribe(
                         pcm_float,
-                        language="en",
                         vad_filter=True,
                         beam_size=5,
-                        initial_prompt="Abhilash, Lumina, health clinic, checkup, booking, appointment",
+                        initial_prompt="Abhilash, Lumina, health clinic, checkup, booking, appointment, doctor, నమస్కారం, అపాయింట్మెంట్, చెకప్",
                     )
                     text = " ".join(seg.text.strip() for seg in segments).strip()
                 
