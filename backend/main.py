@@ -224,12 +224,10 @@ async def audio_socket(websocket: WebSocket):
                     session.barge_in_speech_ms = 0
                 continue
 
-            speaking_now = has_speech(pcm, window_ms=300)
+            speaking_now = has_speech(pcm, window_ms=300, threshold=550)
             if speaking_now:
                 session.silence_ms = 0
                 session.last_frame_had_speech = True
-                session.last_speech_or_prompt_time = now
-                session.inactivity_check_count = 0
                 
                 if session.user_speaking_start_time == 0:
                     session.user_speaking_start_time = now
@@ -237,10 +235,8 @@ async def audio_socket(websocket: WebSocket):
                 elapsed_speaking_ms = (now - session.user_speaking_start_time) * 1000
                 
                 # --- Backchanneling ("mhm", "ok") ---
-                # If the user has been speaking for > 4 seconds since starting their turn
                 if elapsed_speaking_ms > 4000 and not session.backchannel_played:
                     session.backchannel_played = True
-                    # Fire-and-forget an async task without setting assistant_speaking to avoid race conditions
                     async def play_backchannel():
                         try:
                             audio = await synthesize("mhm.")
@@ -251,20 +247,19 @@ async def audio_socket(websocket: WebSocket):
                     asyncio.create_task(play_backchannel())
             else:
                 session.silence_ms += 150
-                # Only reset user speaking duration on sustained silence, not just a brief 150ms pause
                 if session.silence_ms >= 500:
                     session.user_speaking_start_time = 0
 
-            # --- 6-Second Inactivity Check ---
-            # If caller hasn't spoken at all for >6.5 seconds, check in gently instead of looping
-            if not session.last_frame_had_speech and (now - session.last_speech_or_prompt_time > 6.5):
+            # --- 7-Second Inactivity / Silence Check-In ---
+            # If caller hasn't spoken for >7 seconds, check in gently instead of looping
+            if not session.last_frame_had_speech and (now - session.last_speech_or_prompt_time > 7.0):
                 if session.inactivity_check_count == 0:
                     session.inactivity_check_count = 1
                     session.last_speech_or_prompt_time = now
-                    check_in = "Are you there? Take your time, I'm here!"
+                    check_in = "Are you there? Take your time, I'm right here!"
                     await speak(websocket, session, check_in)
                     continue
-                elif session.inactivity_check_count == 1 and (now - session.last_speech_or_prompt_time > 8.0):
+                elif session.inactivity_check_count == 1 and (now - session.last_speech_or_prompt_time > 9.0):
                     session.inactivity_check_count = 2
                     session.last_speech_or_prompt_time = now
                     check_in = "Hello! Can you hear me okay? Just let me know whenever you're ready!"
@@ -277,7 +272,6 @@ async def audio_socket(websocket: WebSocket):
 
                 pcm_float = pcm.astype(np.float32) / 32768.0
 
-                # IMMEDIATELY reset buffer so new audio doesn't pile up
                 session.reset_after_transcript()
                 session.silence_ms = 0
                 session.last_frame_had_speech = False
@@ -315,7 +309,7 @@ async def audio_socket(websocket: WebSocket):
                     )
                     text = " ".join(seg.text.strip() for seg in segments).strip()
                 
-                # Filter Whisper hallucinations (including common short noise clips in Indian/Telugu accents)
+                # Filter Whisper hallucinations
                 hallucinations = [
                     "thank you for watching", "subscribe to", "thanks for watching", 
                     "thank you.", "you.", "you", "please subscribe", "subscribe.",
@@ -327,6 +321,10 @@ async def audio_socket(websocket: WebSocket):
                 if not text:
                     await websocket.send_json({"type": "status", "message": "listening"})
                     continue
+
+                # Valid user speech detected — reset silence timer and check-in count
+                session.last_speech_or_prompt_time = now
+                session.inactivity_check_count = 0
 
                 print(f"[STT Result] '{text}'")
                 await websocket.send_json({"type": "transcript", "text": text, "final": True, "speaker": "user"})
