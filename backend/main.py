@@ -188,6 +188,8 @@ async def audio_socket(websocket: WebSocket):
                     data = json.loads(message["text"])
                     if data.get("type") == "playback_ended":
                         session.assistant_speaking = False
+                        session.last_speech_or_prompt_time = time.time()
+                        session.inactivity_check_count = 0
                         if not session.interrupted:
                             await websocket.send_json({"type": "status", "message": "listening"})
                 except Exception as e:
