@@ -79,7 +79,7 @@ SAMPLE_RATE = 16000
 FRAME_MS = 30  # webrtcvad requires 10/20/30ms frames
 FRAME_SIZE = int(SAMPLE_RATE * FRAME_MS / 1000)  # samples per VAD frame
 
-SILENCE_MS_TO_FINALIZE = 800  # how long user must be silent to trigger transcription
+SILENCE_MS_TO_FINALIZE = 900  # 900ms silence threshold optimized for natural pauses
 
 
 BARGE_IN_CONFIRM_MS = 250  # Reduced from 350 for faster interrupts
@@ -295,23 +295,31 @@ async def audio_socket(websocket: WebSocket):
                     )
                     text = " ".join(seg.text.strip() for seg in segments).strip()
                 
-                # Filter Whisper hallucinations
-                hallucinations = ["thank you for watching", "subscribe to", "thanks for watching", "thank you.", "you.", "you", "please subscribe", "subscribe."]
+                # Filter Whisper hallucinations (including common short noise clips in Indian/Telugu accents)
+                hallucinations = [
+                    "thank you for watching", "subscribe to", "thanks for watching", 
+                    "thank you.", "you.", "you", "please subscribe", "subscribe.",
+                    "hmm.", "haan.", "okay.", "ok.", "ha.", "theek hai.", "nahi.", "haan ji.", "ji haan."
+                ]
                 if len(text) < 2 or text.lower() in hallucinations or "thank you for watching" in text.lower():
                     text = ""
-
 
                 if not text:
                     await websocket.send_json({"type": "status", "message": "listening"})
                     continue
 
+                print(f"[STT Result] '{text}'")
                 await websocket.send_json({"type": "transcript", "text": text, "final": True, "speaker": "user"})
                 await websocket.send_json({"type": "status", "message": "thinking"})
 
+                t0 = time.time()
                 if booking_session.state == BookingState.CONFIRM:
                     reply_text = handle_confirmation(booking_session, text)
                 else:
                     reply_text = handle_turn(booking_session, text)
+                
+                llm_ms = int((time.time() - t0) * 1000)
+                print(f"[LLM Result ({llm_ms}ms)] '{reply_text}'")
 
                 await speak(websocket, session, reply_text)
 
