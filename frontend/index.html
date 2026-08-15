@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lumina Health | AI Appointment Booking</title>
+    <!-- Google Fonts for modern typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Phosphor Icons for elegant UI icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="background-elements">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <div class="container">
+        <!-- Header -->
+        <header class="glass-panel header">
+            <div class="logo">
+                <i class="ph-fill ph-heartbeat"></i>
+                <span>Lumina Health</span>
+            </div>
+            <nav class="nav-links">
+                <a href="#" class="nav-link">Services</a>
+                <a href="#" class="nav-link">Doctors</a>
+                <a href="#" class="nav-link">Locations</a>
+            </nav>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="hero-section text-center">
+                <span class="badge">Next-Gen Patient Care</span>
+                <h1 class="hero-title">Schedule your appointment with our <span class="text-gradient">AI Assistant</span></h1>
+                <p class="hero-subtitle">Experience instant, hassle-free booking. Just click call and speak naturally to our intelligent scheduling agent.</p>
+                
+                <!-- The Core Interaction Area -->
+                <div class="call-action-area">
+                    <button id="call-btn" class="call-btn pulse-anim">
+                        <i class="ph-fill ph-phone-call"></i>
+                        <span id="call-btn-text">Call AI Assistant</span>
+                    </button>
+                    <p class="status-text" id="status-text">Ready to connect.</p>
+                </div>
+
+                <!-- Call Interface (Hidden by default) -->
+                <div id="call-interface" class="glass-panel call-interface hidden">
+                    <div class="call-header">
+                        <div class="agent-profile">
+                            <div class="avatar-ring">
+                                <div class="avatar">
+                                    <i class="ph ph-robot"></i>
+                                </div>
+                            </div>
+                            <div class="agent-info">
+                            <h3>Lumina Assistant</h3>
+                            <div class="status-row">
+                                <span class="live-status"><span class="dot"></span> Connected</span>
+                                <span class="timer-dot">•</span>
+                                <span id="call-timer" class="call-timer">00:00</span>
+                            </div>
+                        </div>
+                        </div>
+                        <button id="end-call-btn" class="end-call-btn">
+                            <i class="ph-fill ph-phone-slash"></i>
+                        </button>
+                    </div>
+
+                    <div class="visualizer">
+                        <div class="bar"></div>
+                        <div class="bar"></div>
+                        <div class="bar"></div>
+                        <div class="bar"></div>
+                        <div class="bar"></div>
+                        <div class="bar"></div>
+                        <div class="bar"></div>
+                    </div>
+
+                    <div class="transcript-area" id="transcript-area">
+                        <!-- Chat bubbles will be injected here by JS -->
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
