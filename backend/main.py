@@ -16,6 +16,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 try:
+    # pyrefly: ignore [missing-import]
     from faster_whisper import WhisperModel
 except ImportError:
     WhisperModel = None
@@ -340,12 +341,12 @@ async def audio_socket(websocket: WebSocket):
                             file=wav_io,
                             model="whisper-large-v3",
                             prompt=(
-                                "Lumina, health clinic, appointment, booking, checkup, consultation, "
-                                "cardiology, dermatology, orthopedic, pediatric, ophthalmology, "
-                                "general physician, surgery, scan, blood test, X-ray, "
-                                "tomorrow, Monday, Tuesday, Wednesday, morning, afternoon, evening, "
+                                "Healthcare voice conversation in English and Telugu at Lumina Clinic. "
+                                "Appointment with doctor, general physician, doctor consultation, checkup, head surgery, surgery, brain surgery, "
+                                "cardiology, dermatology, orthopedic, pediatric, ophthalmology, dentist, blood test, X-ray, "
+                                "tomorrow, Monday, Tuesday, Wednesday, morning, afternoon, evening, 10 AM, 11 AM, 2 PM, "
                                 "haan, nahi, theek hai, kal, parso, subah, dopahar, sham, "
-                                "Abhilash, confirm, cancel, change"
+                                "Abhilash, confirm, cancel, change."
                             ),
                         )
                         text = transcription.text.strip()
@@ -361,12 +362,12 @@ async def audio_socket(websocket: WebSocket):
                             vad_filter=True,
                             beam_size=5,
                             initial_prompt=(
-                                "Lumina, health clinic, appointment, booking, checkup, consultation, "
-                                "cardiology, dermatology, orthopedic, pediatric, ophthalmology, "
-                                "general physician, surgery, scan, blood test, X-ray, "
+                                "Healthcare voice conversation in English and Telugu at Lumina Clinic. "
+                                "Appointment with doctor, general physician, doctor consultation, checkup, head surgery, surgery, brain surgery, "
+                                "cardiology, dermatology, orthopedic, pediatric, ophthalmology, dentist, "
                                 "tomorrow, Monday, Tuesday, Wednesday, morning, afternoon, evening, "
                                 "haan, nahi, theek hai, kal, parso, subah, dopahar, sham, "
-                                "Abhilash, confirm, cancel, change"
+                                "Abhilash, confirm, cancel, change."
                             ),
                         )
                         text = " ".join(seg.text.strip() for seg in segments).strip()

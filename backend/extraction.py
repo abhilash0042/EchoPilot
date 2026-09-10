@@ -25,14 +25,27 @@ else:
 
 
 FIELD_PROMPTS = {
-    "service": """Extract the medical service/department the caller wants (e.g. "general checkup",
-"dentist", "cardiology", "eye checkup", "డెంటిస్ట్", "జనరల్ చెకప్"). Understand both English and Telugu inputs. If unclear, return null.""",
+    "service": """Extract the medical service, specialist doctor, procedure, or consultation the caller wants.
+Examples:
+- "appointment with doctor", "see a doctor", "doctor", "physician", "consultation", "doctor appointment" -> "general physician"
+- "surgery for my head", "head surgery", "brain surgery", "neuro", "neurosurgery" -> "neurosurgery"
+- "surgery", "operation", "surgical procedure" -> "surgery consultation"
+- "checkup", "full body check", "routine check", "health examination" -> "general checkup"
+- "heart", "chest pain", "cardiologist", "cardiology" -> "cardiology"
+- "skin", "rash", "acne", "dermatologist", "dermatology" -> "dermatology"
+- "bones", "fracture", "joint pain", "ortho", "orthopedic" -> "orthopedic"
+- "eyes", "vision", "cataract", "ophthalmology" -> "ophthalmology"
+- "child", "baby", "pediatric", "pediatrician" -> "pediatric"
+- "teeth", "dental", "dentist" -> "dentist"
+- "డెంటిస్ట్", "డాక్టర్", "జనరల్ చెకప్", "గుండె", "కంటి", "సర్జరీ"
+- Handles English, Telugu, Hindi, Urdu, or transliterated inputs (e.g. "ہائట్ سارجری" -> "neurosurgery").
+If the caller expresses ANY intent to see a doctor, get a checkup, or have surgery/consultation, extract the appropriate clinical service name. Only return null if completely off-topic or unrelated (e.g. weather, general chit-chat, 'thank you').""",
 
     "date": """Extract the appointment date mentioned by the caller and convert to ISO format YYYY-MM-DD.
-Today's date is {today}. Handle English and Telugu terms (e.g., "tomorrow", "next Monday", "రేపు" -> tomorrow, "ఎల్లుండి" -> day after tomorrow, "వచ్చే సోమవారం"). If unclear, return null.""",
+Today's date is {today}. Handle English and Telugu terms (e.g., "tomorrow", "next Monday", "రేపు" -> tomorrow, "ఎల్లుండి" -> day after tomorrow, "వచ్చే సోమవారం", "kal", "parso"). If unclear, return null.""",
 
     "time": """Extract the appointment time and convert to 24-hour HH:MM format.
-Handle English and Telugu terms ("morning" / "ఉదయం" -> 10:00, "afternoon" / "మధ్యాహ్నం" -> 14:00, "evening" / "సాయంత్రం" -> 18:00, "10 o'clock" / "10 గంటలకు" -> 10:00). If unclear, return null.""",
+Handle English and Telugu terms ("morning" / "ఉదయం" -> 10:00, "afternoon" / "మధ్యాహ్నం" -> 14:00, "evening" / "సాయంత్రం" -> 18:00, "10 o'clock" / "10 గంటలకు" -> 10:00, "10 am" -> 10:00, "2 pm" -> 14:00). If unclear, return null.""",
 
     "name": """Extract the caller's full name. Handle Indian names in English or Telugu script. If unclear, return null.""",
 
@@ -75,7 +88,7 @@ No other text, no markdown formatting."""
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_text},
             ],
-            max_tokens=60,
+            max_tokens=100,
             temperature=0,
             response_format={"type": "json_object"}
         )
@@ -148,10 +161,12 @@ Then smoothly bring the conversation back to your question."""
         result = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
-            max_tokens=100,
+            max_tokens=150,
             temperature=0.8,
         )
         reply = result.choices[0].message.content.strip()
+        if "</think>" in reply:
+            reply = reply.split("</think>")[-1].strip()
         if reply.startswith('"') and reply.endswith('"'):
             reply = reply[1:-1]
         return reply
