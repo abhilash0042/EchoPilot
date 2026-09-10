@@ -6,7 +6,8 @@ import os
 import site
 import json
 import wave
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
+from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -27,6 +28,7 @@ from tts import synthesize
 from extraction import add_to_history, reset_history
 import database
 from seed_data import seed_database
+from belfry_client import belfry_check_input, belfry_check_output
 
 # --- Windows GPU DLL Fix ---
 # Dynamically add pip-installed NVIDIA libraries to the Windows DLL search path
@@ -62,8 +64,9 @@ ALLOWED_ORIGINS = [
     "https://echopilot-voice-agent.onrender.com"
 ]
 
-if os.getenv("ALLOWED_ORIGINS"):
-    ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS").split(",") if origin.strip()]
+_allowed_origins_env = os.getenv("ALLOWED_ORIGINS")
+if _allowed_origins_env:
+    ALLOWED_ORIGINS = [origin.strip() for origin in _allowed_origins_env.split(",") if origin.strip()]
 
 app.add_middleware(
     CORSMiddleware,
@@ -75,27 +78,30 @@ app.add_middleware(
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
+groq_client: Optional[OpenAI] = None
 if GROQ_API_KEY:
     groq_client = OpenAI(
         base_url="https://api.groq.com/openai/v1",
         api_key=GROQ_API_KEY
     )
     print("[STT] Connected to Groq Cloud API (whisper-large-v3)")
-else:
-    groq_client = None
 
-# Fallback local whisper model
-model = None
-if WhisperModel:
-    try:
-        model = WhisperModel("small", device="cuda", compute_type="float16")
-        print("[STT] Local CUDA Faster-Whisper model loaded")
-    except Exception as e:
+# Fallback local whisper model (lazy-loaded if Groq cloud STT is unavailable)
+_local_whisper_model = None
+
+def get_local_whisper_model():
+    global _local_whisper_model
+    if _local_whisper_model is None and WhisperModel:
         try:
-            model = WhisperModel("small", device="cpu", compute_type="int8")
-            print("[STT] Local CPU Faster-Whisper model loaded")
-        except Exception as e2:
-            print(f"[STT] Local Whisper model skipped: {e2}")
+            _local_whisper_model = WhisperModel("small", device="cuda", compute_type="float16")
+            print("[STT] Local CUDA Faster-Whisper model loaded")
+        except Exception:
+            try:
+                _local_whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
+                print("[STT] Local CPU Faster-Whisper model loaded")
+            except Exception as e2:
+                print(f"[STT] Local Whisper model skipped: {e2}")
+    return _local_whisper_model
 
 
 
@@ -127,9 +133,10 @@ class AudioSession:
 
     def add_chunk(self, chunk: bytes):
         self.pcm_buffer.extend(chunk)
-        # Cap buffer at ~3 seconds to prevent memory bloat (16000 rate * 2 bytes/sample * 3s = 96000 bytes)
-        if len(self.pcm_buffer) > 96000:
-            self.pcm_buffer = self.pcm_buffer[-96000:]
+        # Cap buffer at ~15 seconds (16000 rate * 2 bytes/sample * 15s = 480000 bytes)
+        # 3s was too short — long sentences (>3s) had their first words silently discarded
+        if len(self.pcm_buffer) > 480000:
+            self.pcm_buffer = self.pcm_buffer[-480000:]
 
     def get_full_pcm(self) -> np.ndarray:
         if not self.pcm_buffer:
@@ -201,7 +208,6 @@ async def audio_socket(websocket: WebSocket):
     await websocket.send_json({"type": "status", "message": "connected"})
     
     greeting = "Hey there! I'm Lumina from the health clinic. What can I help you with today?"
-    booking_session.state = BookingState.COLLECT_SERVICE
     add_to_history("assistant", greeting)
     transcript_history.append(f"Assistant: {greeting}")
     await speak(websocket, session, greeting)
@@ -255,7 +261,7 @@ async def audio_socket(websocket: WebSocket):
                     session.barge_in_speech_ms = 0
                 continue
 
-            speaking_now = has_speech(pcm, window_ms=300, threshold=550)
+            speaking_now = has_speech(pcm, window_ms=300, threshold=300)  # was 550 — soft/accented speech was being missed
             if speaking_now:
                 session.silence_ms = 0
                 session.last_frame_had_speech = True
@@ -273,7 +279,7 @@ async def audio_socket(websocket: WebSocket):
                             audio = await synthesize("mhm.")
                             if not session.interrupted:
                                 await websocket.send_bytes(audio)
-                        except Exception as e:
+                        except Exception:
                             pass
                     asyncio.create_task(play_backchannel())
             else:
@@ -302,11 +308,21 @@ async def audio_socket(websocket: WebSocket):
             if session.last_frame_had_speech and session.silence_ms >= SILENCE_MS_TO_FINALIZE:
                 await websocket.send_json({"type": "status", "message": "transcribing"})
 
+                # Capture the COMPLETE utterance BEFORE resetting the buffer.
+                # The `pcm` variable above was snapshotted earlier in the loop and may
+                # be missing the last 150ms chunk. Re-read directly from the buffer now.
+                final_pcm = session.get_full_pcm()
+
                 session.reset_after_transcript()
                 session.silence_ms = 0
                 session.last_frame_had_speech = False
                 session.user_speaking_start_time = 0
                 session.backchannel_played = False
+
+                if len(final_pcm) < 1600:
+                    # Less than 0.1s of audio — noise or tiny click, safely ignore
+                    await websocket.send_json({"type": "status", "message": "listening"})
+                    continue
 
                 text = ""
                 if groq_client:
@@ -316,36 +332,60 @@ async def audio_socket(websocket: WebSocket):
                             wf.setnchannels(1)
                             wf.setsampwidth(2)
                             wf.setframerate(16000)
-                            wf.writeframes(pcm.tobytes())
+                            wf.writeframes(final_pcm.tobytes())  # use final_pcm — complete utterance
                         wav_io.seek(0)
                         wav_io.name = "audio.wav"
 
                         transcription = groq_client.audio.transcriptions.create(
                             file=wav_io,
                             model="whisper-large-v3",
-                            prompt="Abhilash, Lumina, health clinic, checkup, booking, appointment, doctor, cardiology, dermatology",
+                            prompt=(
+                                "Lumina, health clinic, appointment, booking, checkup, consultation, "
+                                "cardiology, dermatology, orthopedic, pediatric, ophthalmology, "
+                                "general physician, surgery, scan, blood test, X-ray, "
+                                "tomorrow, Monday, Tuesday, Wednesday, morning, afternoon, evening, "
+                                "haan, nahi, theek hai, kal, parso, subah, dopahar, sham, "
+                                "Abhilash, confirm, cancel, change"
+                            ),
                         )
                         text = transcription.text.strip()
                     except Exception as e:
                         print(f"Groq Whisper STT Error, falling back to local model: {e}")
 
-                if not text and model:
-                    pcm_float = pcm.astype(np.float32) / 32768.0
-                    segments, _ = model.transcribe(
-                        pcm_float,
-                        vad_filter=True,
-                        beam_size=5,
-                        initial_prompt="Abhilash, Lumina, health clinic, checkup, booking, appointment, doctor",
-                    )
-                    text = " ".join(seg.text.strip() for seg in segments).strip()
+                if not text:
+                    local_model = get_local_whisper_model()
+                    if local_model:
+                        pcm_float = final_pcm.astype(np.float32) / 32768.0  # use final_pcm
+                        segments, _ = local_model.transcribe(
+                            pcm_float,
+                            vad_filter=True,
+                            beam_size=5,
+                            initial_prompt=(
+                                "Lumina, health clinic, appointment, booking, checkup, consultation, "
+                                "cardiology, dermatology, orthopedic, pediatric, ophthalmology, "
+                                "general physician, surgery, scan, blood test, X-ray, "
+                                "tomorrow, Monday, Tuesday, Wednesday, morning, afternoon, evening, "
+                                "haan, nahi, theek hai, kal, parso, subah, dopahar, sham, "
+                                "Abhilash, confirm, cancel, change"
+                            ),
+                        )
+                        text = " ".join(seg.text.strip() for seg in segments).strip()
                 
-                # Filter Whisper hallucinations
-                hallucinations = [
-                    "thank you for watching", "subscribe to", "thanks for watching", 
-                    "thank you.", "you.", "you", "please subscribe", "subscribe.",
-                    "hmm.", "haan.", "okay.", "ok.", "ha.", "theek hai.", "nahi.", "haan ji.", "ji haan."
+                # Filter Whisper hallucinations — only block clear YouTube-style noise,
+                # NOT valid single-word responses like "haan", "okay", "nahi" that users
+                # genuinely say in a healthcare booking conversation.
+                HALLUCINATION_SUBSTRINGS = [
+                    "thank you for watching", "subscribe to our", "thanks for watching",
+                    "please subscribe", "like and subscribe",
                 ]
-                if len(text) < 2 or text.lower() in hallucinations or "thank you for watching" in text.lower():
+                HALLUCINATION_EXACT = {"hmm", "hmm.", "uh.", "uh", "um.", "um"}
+                t_lower = text.lower().strip()
+                is_hallucination = (
+                    len(t_lower) < 2
+                    or t_lower in HALLUCINATION_EXACT
+                    or any(p in t_lower for p in HALLUCINATION_SUBSTRINGS)
+                )
+                if is_hallucination:
                     text = ""
 
                 if not text:
@@ -361,6 +401,14 @@ async def audio_socket(websocket: WebSocket):
                 await websocket.send_json({"type": "transcript", "text": text, "final": True, "speaker": "user"})
                 await websocket.send_json({"type": "status", "message": "thinking"})
 
+                # Check user input BEFORE sending to LLM (via Belfry SDK)
+                in_res = await belfry_check_input(text)
+                if in_res.get("action") == "block":
+                    refusal = "I apologize, but I cannot process that request. How else may I assist you?"
+                    transcript_history.append(f"Assistant: {refusal}")
+                    await speak(websocket, session, refusal)
+                    continue
+
                 t0 = time.time()
                 if booking_session.state == BookingState.CONFIRM:
                     reply_text = handle_confirmation(booking_session, text)
@@ -369,6 +417,12 @@ async def audio_socket(websocket: WebSocket):
                 
                 llm_ms = int((time.time() - t0) * 1000)
                 print(f"[LLM Result ({llm_ms}ms)] '{reply_text}'")
+
+                # Check LLM output BEFORE returning to user (via Belfry SDK)
+                out_res = await belfry_check_output(reply_text)
+                if out_res.get("action") == "block":
+                    reply_text = "I apologize, but I cannot share that information. Let's proceed with your appointment."
+
                 transcript_history.append(f"Assistant: {reply_text}")
 
                 await speak(websocket, session, reply_text)
@@ -397,8 +451,6 @@ async def audio_socket(websocket: WebSocket):
 # ==========================================
 # REST API ENDPOINTS FOR DATABASE & RECORDS
 # ==========================================
-
-from pydantic import BaseModel
 
 class QuickBookingRequest(BaseModel):
     service: str
@@ -522,11 +574,33 @@ async def api_chat_message(req: ChatMessageRequest):
             "is_booked": False
         }
 
+    # Check user input BEFORE sending to LLM (via Belfry SDK)
+    in_res = await belfry_check_input(user_text)
+    if in_res.get("action") == "block":
+        return {
+            "reply": "I apologize, but I cannot process that request. How else can I assist with your appointment?",
+            "state": session.state.value,
+            "slots": {
+                "service": session.slots.service,
+                "date": session.slots.date,
+                "time": session.slots.time,
+                "name": session.slots.name,
+                "phone": session.slots.phone,
+            },
+            "quick_replies": get_state_quick_replies(session.state),
+            "is_booked": False
+        }
+
     # Execute dialogue turn
     if session.state == BookingState.CONFIRM:
         reply_text = handle_confirmation(session, user_text)
     else:
         reply_text = handle_turn(session, user_text)
+
+    # Check LLM output BEFORE returning to user (via Belfry SDK)
+    out_res = await belfry_check_output(reply_text)
+    if out_res.get("action") == "block":
+        reply_text = "I apologize, but I cannot share that information. How else can I help you?"
 
     is_booked = (session.state == BookingState.BOOKED)
 

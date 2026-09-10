@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import database
 from seed_data import seed_database
-from booking_store import is_slot_available, save_booking
+from booking_store import save_booking
 from booking import BookingSlots
 
 
@@ -63,10 +63,6 @@ class TestHealthcareDatabase(unittest.TestCase):
 
     def test_04_slot_availability_check(self):
         """Verify slot availability detection against appointments."""
-        # Tomorrow slot LUM-10492 is booked for Cardiology at 10:00
-        from datetime import datetime, timedelta
-        tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-        
         # Unbooked random slot
         free_date = "2029-12-31"
         self.assertTrue(database.check_slot_available(free_date, "15:30"))

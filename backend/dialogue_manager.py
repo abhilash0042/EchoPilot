@@ -1,5 +1,5 @@
 from booking import BookingSession, BookingState
-from extraction import extract_field, get_conversational_reply, extract_confirmation, add_to_history, reset_history
+from extraction import extract_field, get_conversational_reply, extract_confirmation, add_to_history
 from booking_store import is_slot_available, save_booking
 from datetime import datetime
 
@@ -27,6 +27,7 @@ def handle_turn(session: BookingSession, user_text: str) -> str:
         value = extract_field(field, user_text)
         if value:
             setattr(session.slots, field, value)
+            add_to_history("user", user_text)  # ← was missing: track successful extraction
             session.advance()
         else:
             # Couldn't extract — use LLM to chit-chat and steer back naturally
@@ -41,7 +42,9 @@ def handle_turn(session: BookingSession, user_text: str) -> str:
         if not is_slot_available(s.date, s.time):
             # Slot taken — bump back to re-ask for time
             session.state = BookingState.COLLECT_TIME
-            return f"Sorry, {s.time} on {s.date} is already booked. What other time works for you?"
+            reply = f"Sorry, {s.time} on {s.date} is already booked. What other time works for you?"
+            add_to_history("assistant", reply)
+            return reply
             
         # Format date and time for TTS
         try:
@@ -56,11 +59,13 @@ def handle_turn(session: BookingSession, user_text: str) -> str:
         except:
             spoken_time = s.time
 
-        return (
+        reply = (
             f"Alright, just to make sure I got everything right: "
             f"{s.service} appointment for {s.name} on {spoken_date} "
             f"at {spoken_time}, and I'll reach you at {s.phone}. Sound good?"
         )
+        add_to_history("assistant", reply)
+        return reply
 
     if session.state == BookingState.BOOKED:
         session.state = BookingState.COLLECT_SERVICE

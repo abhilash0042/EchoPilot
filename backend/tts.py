@@ -55,7 +55,7 @@ async def synthesize(text: str) -> bytes:
 
         with open(tmp_path, "rb") as f:
             return inject_ai_watermark(f.read())
-    except Exception as e:
+    except Exception:
         # Fallback to Neerja
         try:
             communicate = edge_tts.Communicate(text, "en-IN-NeerjaNeural", rate="+0%")

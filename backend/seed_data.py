@@ -5,7 +5,6 @@ Populates realistic sample data including sensitive hospital records and custome
 
 import sys
 import os
-import random
 from datetime import datetime, timedelta
 
 # Ensure backend directory is in python path

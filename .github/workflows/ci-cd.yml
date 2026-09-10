@@ -1,0 +1,70 @@
+name: EchoPilot CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  lint-and-test:
+    name: Lint & Test Backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pyflakes ruff
+
+      - name: Run Static Analysis & Syntax Checks
+        run: |
+          python -m py_compile backend/*.py
+          pyflakes backend/*.py
+          ruff check --select E9,F backend/*.py
+
+      - name: Run Database Unit Tests
+        run: |
+          cd backend
+          python test_database.py
+
+  deploy:
+    name: Deploy to Production
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Trigger Render Deploy Hook (if configured)
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -n "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "🚀 Triggering Render Deploy Hook..."
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$RENDER_DEPLOY_HOOK_URL")
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            echo "Render response code: $HTTP_CODE"
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+              echo "✅ Render deployment successfully triggered!"
+            else
+              echo "⚠️ Render returned HTTP $HTTP_CODE: $RESPONSE"
+            fi
+          else
+            echo "ℹ️ Note: Auto-Deploy on Render is connected directly to the GitHub repository."
+            echo "Pushing commits to 'main' automatically triggers Render builds."
+            echo "To enable explicit hook triggering, add RENDER_DEPLOY_HOOK_URL in GitHub Repository Secrets."
+          fi

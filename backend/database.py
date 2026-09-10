@@ -6,7 +6,6 @@ Includes sensitive hospital records and customer/patient health data.
 
 import sqlite3
 import os
-import json
 import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any

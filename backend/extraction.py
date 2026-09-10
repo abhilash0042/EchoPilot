@@ -80,6 +80,9 @@ No other text, no markdown formatting."""
             response_format={"type": "json_object"}
         )
         raw = result.choices[0].message.content.strip()
+        # Strip Qwen3 reasoning/thinking tags before parsing JSON
+        if "</think>" in raw:
+            raw = raw.split("</think>")[-1].strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         parsed = json.loads(raw)
         return parsed.get("value")
@@ -180,7 +183,11 @@ Respond with ONLY a JSON object: {"value": "yes"} or {"value": "no"} or {"value"
             max_tokens=20,
             temperature=0,
         )
-        raw = result.choices[0].message.content.strip().replace("```json", "").replace("```", "").strip()
+        raw = result.choices[0].message.content.strip()
+        # Strip Qwen3 thinking tags before parsing JSON
+        if "</think>" in raw:
+            raw = raw.split("</think>")[-1].strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
         parsed = json.loads(raw)
         return parsed.get("value")
     except:

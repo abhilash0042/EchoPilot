@@ -3,7 +3,7 @@ import requests
 import logging
 from typing import Dict, Any
 
-from database import check_slot_available, create_appointment, get_or_create_patient
+from database import check_slot_available, create_appointment
 
 logger = logging.getLogger(__name__)
 

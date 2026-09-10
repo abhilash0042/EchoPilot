@@ -164,7 +164,8 @@ function startStreaming(stream) {
     // This context runs at 16kHz for clean STT recording
     audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: AUDIO_SAMPLE_RATE });
     audioInput = audioContext.createMediaStreamSource(stream);
-    processor = audioContext.createScriptProcessor(4096, 1, 1);
+    processor = audioContext.createScriptProcessor(2048, 1, 1);  // was 4096 (256ms) — halved to 128ms latency so first syllables aren't lost
+
     
     audioInput.connect(processor);
     processor.connect(audioContext.destination);

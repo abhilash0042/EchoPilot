@@ -9,5 +9,7 @@ services:
     envVars:
       - key: GROQ_API_KEY
         sync: false
+      - key: LLM_MODEL
+        value: qwen/qwen3.8-27b
       - key: PYTHON_VERSION
         value: 3.11.0
