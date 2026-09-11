@@ -214,9 +214,10 @@ async function playReceivedAudio(blob) {
             currentAudio = null;
         }
 
-        // Create an object URL from the audio blob (MP3/WAV)
+        // Create an object URL from the audio blob with explicit audio/mpeg MIME type
         // Routing through HTMLAudioElement allows Chromium/WebKit WebRTC AEC to hook into the playback stream
-        const audioUrl = URL.createObjectURL(blob);
+        const audioBlob = (blob instanceof Blob && blob.type) ? blob : new Blob([blob], { type: 'audio/mpeg' });
+        const audioUrl = URL.createObjectURL(audioBlob);
         const audio = new Audio(audioUrl);
         currentAudio = audio;
 
