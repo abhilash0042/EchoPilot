@@ -59,7 +59,7 @@ async function startCall() {
         }
         ws = new WebSocket(`${wsProtocol}//${wsHost}/ws/audio`);
         
-        ws.onopen = () => {
+        ws.onopen = async () => {
             isConnected = true;
             console.log("WebSocket connected");
             
