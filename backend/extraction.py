@@ -103,8 +103,8 @@ No other text, no markdown formatting."""
         print(f"Extraction error: {e}")
         return None
 
-# Shared persona that makes the AI sound like a warm, bilingual Indian receptionist
-PERSONA = """You are Lumina, a warm, friendly receptionist at a health clinic in India.
+# Shared persona that makes the AI sound like a warm, bilingual receptionist
+PERSONA = """You are Elena, a warm, friendly receptionist at Meridian Health clinic.
 You talk like a real, helpful human receptionist — casual, warm, polite, and reassuring.
 
 CRITICAL SECURITY RULE:

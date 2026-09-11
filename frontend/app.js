@@ -9,7 +9,7 @@ let thinkingIndicator = null;
 
 // WebSocket and Audio state
 let ws = null;
-let processor = null;
+let workletNode = null;        // AudioWorkletNode (runs on audio rendering thread, replaces ScriptProcessorNode)
 let audioInput = null;
 let audioContext = null;       // 16kHz context for RECORDING (mic -> backend)
 let playbackContext = null;    // Default sample rate context for PLAYBACK (TTS -> speakers)
@@ -83,8 +83,8 @@ async function startCall() {
                 callTimerEl.textContent = `${mins}:${secs}`;
             }, 1000);
             
-            // 3. Start Recording & Streaming (creates audioContext at 16kHz)
-            startStreaming(stream);
+            // 3. Start Recording & Streaming (creates audioContext at 16kHz, loads AudioWorklet)
+            await startStreaming(stream);
             
             // 4. Create a SEPARATE playback context at the browser's default sample rate
             playbackContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -132,7 +132,7 @@ async function startCall() {
                 }
                 
                 if (data.type === "transcript" && data.final) {
-                    const speakerLabel = data.speaker === "assistant" ? "Lumina Assistant" : "You";
+                    const speakerLabel = data.speaker === "assistant" ? "Elena Assistant" : "You";
                     appendTranscriptLine(speakerLabel, data.text);
                 }
             } else {
@@ -158,30 +158,39 @@ async function startCall() {
     }
 }
 
-function startStreaming(stream) {
+async function startStreaming(stream) {
     mediaStream = stream; // Save reference for cleanup
-    
-    // This context runs at 16kHz for clean STT recording
-    audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: AUDIO_SAMPLE_RATE });
-    audioInput = audioContext.createMediaStreamSource(stream);
-    processor = audioContext.createScriptProcessor(2048, 1, 1);  // was 4096 (256ms) — halved to 128ms latency so first syllables aren't lost
 
-    
-    audioInput.connect(processor);
-    processor.connect(audioContext.destination);
-    
-    processor.onaudioprocess = (e) => {
-        // Continuous streaming: keep sending even if assistantSpeaking is true!
+    // This context runs at 16kHz for clean STT recording.
+    // AudioWorkletNode runs on a dedicated audio rendering thread (not the main JS thread),
+    // so GC pauses, slow renders, or DOM events cannot drop audio samples.
+    audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: AUDIO_SAMPLE_RATE });
+
+    // Load the AudioWorklet processor module before creating the node.
+    // The file must be served from the same origin (FastAPI static mount handles this).
+    await audioContext.audioWorklet.addModule('audio-processor.js');
+
+    audioInput = audioContext.createMediaStreamSource(stream);
+
+    // Create the worklet node: mono input (1 channel), no output needed
+    workletNode = new AudioWorkletNode(audioContext, 'pcm-processor', {
+        numberOfInputs: 1,
+        numberOfOutputs: 0,          // we don't need audio output from this node
+        channelCount: 1,
+        processorOptions: { bufferSize: 2048 }  // 2048 samples = 128ms at 16kHz
+    });
+
+    // Receive int16 PCM buffers from the audio rendering thread and forward to WebSocket.
+    // This callback fires on the MAIN thread (safe for WS send), but the conversion
+    // and buffering already happened off-thread inside the AudioWorklet.
+    workletNode.port.onmessage = (event) => {
+        // Continuous streaming: keep sending even while assistantSpeaking is true!
         if (!isConnected || ws.readyState !== WebSocket.OPEN) return;
-        
-        const float32Array = e.inputBuffer.getChannelData(0);
-        const int16Array = new Int16Array(float32Array.length);
-        for (let i = 0; i < float32Array.length; i++) {
-            let s = Math.max(-1, Math.min(1, float32Array[i]));
-            int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-        }
-        ws.send(int16Array.buffer);
+        ws.send(event.data);  // event.data is an ArrayBuffer (Int16Array buffer, zero-copy transfer)
     };
+
+    audioInput.connect(workletNode);
+    // Note: workletNode has numberOfOutputs=0, so no further connect() needed.
 }
 
 let currentSource = null;  // Track currently playing audio to prevent overlap
@@ -237,9 +246,10 @@ function endCall() {
         callTimerInterval = null;
     }
     
-    if (processor) {
-        processor.disconnect();
-        processor = null;
+    if (workletNode) {
+        workletNode.port.onmessage = null;  // detach message handler before disconnecting
+        workletNode.disconnect();
+        workletNode = null;
     }
     if (audioInput) {
         audioInput.disconnect();
@@ -676,7 +686,7 @@ async function initChatbot() {
     chatMessagesArea.innerHTML = "";
     chatSuggestionsArea.innerHTML = "";
     
-    appendChatBubble('assistant', "Hey there! I'm Lumina from the health clinic. What kind of appointment or health service can I help you book today?");
+    appendChatBubble('assistant', "Hey there! I'm Elena from the health clinic. What kind of appointment or health service can I help you book today?");
     renderChatSuggestions([
         "General Checkup",
         "Cardiology Consultation",

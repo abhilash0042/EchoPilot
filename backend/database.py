@@ -1,5 +1,5 @@
 """
-Database Layer for Lumina Health AI Voice Agent
+Database Layer for Meridian Health AI Voice Agent
 Handles database connections, schema setup, queries, and transactions using SQLite.
 Includes sensitive hospital records and customer/patient health data.
 """
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # Database file path
 DB_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.environ.get("DATABASE_PATH", os.path.join(DB_DIR, "lumina_health.db"))
+DB_PATH = os.environ.get("DATABASE_PATH", os.path.join(DB_DIR, "meridian_health.db"))
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -111,7 +111,7 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS appointments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        booking_code TEXT NOT NULL UNIQUE,         -- Reference code like LUM-49281
+        booking_code TEXT NOT NULL UNIQUE,         -- Reference code like MER-49281
         patient_id INTEGER NOT NULL,
         doctor_id INTEGER,
         service_id INTEGER,
@@ -181,7 +181,7 @@ def get_or_create_patient(name: str, phone: str, **kwargs) -> Dict[str, Any]:
 
     # Generate MRN for new patient
     import random
-    mrn = f"MRN-{random.randint(10000, 99999)}-LUM"
+    mrn = f"MRN-{random.randint(10000, 99999)}-MER"
 
     cursor.execute("""
     INSERT INTO patients (
@@ -205,7 +205,7 @@ def get_or_create_patient(name: str, phone: str, **kwargs) -> Dict[str, Any]:
         kwargs.get("insurance_policy_number", f"POL-{random.randint(100000, 999999)}"),
         kwargs.get("emergency_contact_name", "Family Contact"),
         kwargs.get("emergency_contact_phone", phone),
-        kwargs.get("confidential_notes", "Registered via Lumina AI Voice Agent.")
+        kwargs.get("confidential_notes", "Registered via Meridian AI Voice Agent.")
     ))
     conn.commit()
     new_id = cursor.lastrowid
@@ -299,7 +299,7 @@ def create_appointment(
     doctor = match_doctor_for_service(service_name)
     
     import random
-    booking_code = f"LUM-{random.randint(10000, 99999)}"
+    booking_code = f"MER-{random.randint(10000, 99999)}"
     
     cursor.execute("""
     INSERT INTO appointments (

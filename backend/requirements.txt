@@ -9,3 +9,16 @@ edge-tts>=7.0.0
 httpx>=0.25.0
 aiofiles>=24.0.0
 tenacity>=8.0.0
+pydub>=0.25.1
+miniaudio>=1.7
+
+# Optional: Azure Cognitive Services Neural TTS (Tier 1 — official, SLA-backed)
+# Activates when AZURE_SPEECH_KEY env var is set. Same voices as edge-tts but licensed.
+# Uncomment to install: (binary wheel ~50MB on Windows)
+# azure-cognitiveservices-speech>=1.38.0
+
+# Optional: Piper local TTS (Tier 3 — fully offline fallback, no network required)
+# Requires PIPER_MODEL_PATH env var pointing to a downloaded .onnx model file.
+# Download models from: https://huggingface.co/rhasspy/piper-voices
+# Uncomment to install:
+# piper-tts>=1.2.0

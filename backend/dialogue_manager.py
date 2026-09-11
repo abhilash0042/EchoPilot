@@ -4,7 +4,7 @@ from booking_store import is_slot_available, save_booking
 from datetime import datetime
 
 PROMPTS = {
-    BookingState.GREETING: "Hey there! I'm Lumina from the health clinic. What can I help you with today?",
+    BookingState.GREETING: "Hey there! I'm Elena from the health clinic. What can I help you with today?",
     BookingState.COLLECT_SERVICE: "So what kind of appointment are you looking for?",
     BookingState.COLLECT_DATE: "Cool! And what day works best for you?",
     BookingState.COLLECT_TIME: "Got it! What time would you like to come in?",
@@ -25,6 +25,9 @@ def handle_turn(session: BookingSession, user_text: str) -> str:
 
     if field:
         value = extract_field(field, user_text)
+        # Log every extraction attempt so STT accuracy vs NLU parsing failures can be bisected:
+        # If raw transcript looks correct but extracted=None, the issue is NLU, not STT.
+        print(f"[NLU] field={field} transcript='{user_text[:100]}' extracted={repr(value)}")
         if value:
             setattr(session.slots, field, value)
             add_to_history("user", user_text)  # ← was missing: track successful extraction

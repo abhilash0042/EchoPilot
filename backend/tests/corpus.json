@@ -1,0 +1,281 @@
+[
+  {
+    "id": "clean_01",
+    "file": "clean_01.wav",
+    "category": "clean",
+    "subcategory": "service",
+    "expected_transcript": "I need to book a cardiology appointment",
+    "expected_slots": { "service": "cardiology" },
+    "notes": "Clean audio, normal pace, unambiguous service name"
+  },
+  {
+    "id": "clean_02",
+    "file": "clean_02.wav",
+    "category": "clean",
+    "subcategory": "service",
+    "expected_transcript": "I'd like to see a general physician",
+    "expected_slots": { "service": "general physician" },
+    "notes": "Clean audio, indirect phrasing for service"
+  },
+  {
+    "id": "clean_03",
+    "file": "clean_03.wav",
+    "category": "clean",
+    "subcategory": "date_time",
+    "expected_transcript": "Tomorrow at 10 AM",
+    "expected_slots": { "time": "10:00" },
+    "notes": "Relative date + AM/PM format"
+  },
+  {
+    "id": "clean_04",
+    "file": "clean_04.wav",
+    "category": "clean",
+    "subcategory": "name",
+    "expected_transcript": "My name is Abhilash",
+    "expected_slots": { "name": "Abhilash" },
+    "notes": "Common Indian name, single word"
+  },
+  {
+    "id": "clean_05",
+    "file": "clean_05.wav",
+    "category": "clean",
+    "subcategory": "confirmation",
+    "expected_transcript": "Yes that sounds good",
+    "expected_slots": { "confirmation": "yes" },
+    "notes": "Informal affirmative"
+  },
+  {
+    "id": "clean_06",
+    "file": "clean_06.wav",
+    "category": "clean",
+    "subcategory": "confirmation",
+    "expected_transcript": "No I'd like to change the time",
+    "expected_slots": { "confirmation": "no" },
+    "notes": "Rejection with reason"
+  },
+  {
+    "id": "clean_07",
+    "file": "clean_07.wav",
+    "category": "clean",
+    "subcategory": "phone",
+    "expected_transcript": "My number is 9876543210",
+    "expected_slots": { "phone": "9876543210" },
+    "notes": "10-digit phone number spoken as sequence"
+  },
+  {
+    "id": "clean_08",
+    "file": "clean_08.wav",
+    "category": "clean",
+    "subcategory": "service",
+    "expected_transcript": "I need a skin checkup",
+    "expected_slots": { "service": "dermatology" },
+    "notes": "Indirect service — NLU must infer dermatology from 'skin'"
+  },
+  {
+    "id": "rushed_01",
+    "file": "rushed_01.wav",
+    "category": "rushed",
+    "subcategory": "multi_slot",
+    "expected_transcript": "cardiology appointment tomorrow afternoon",
+    "expected_slots": { "service": "cardiology", "time": "14:00" },
+    "notes": "Fast, clipped speech, multiple slots in one utterance"
+  },
+  {
+    "id": "rushed_02",
+    "file": "rushed_02.wav",
+    "category": "rushed",
+    "subcategory": "confirmation",
+    "expected_transcript": "yeah sounds good",
+    "expected_slots": { "confirmation": "yes" },
+    "notes": "Very short, fast affirmative — hallucination risk"
+  },
+  {
+    "id": "rushed_03",
+    "file": "rushed_03.wav",
+    "category": "rushed",
+    "subcategory": "phone",
+    "expected_transcript": "9876543210",
+    "expected_slots": { "phone": "9876543210" },
+    "notes": "Phone number only, no intro, fast delivery"
+  },
+  {
+    "id": "paused_01",
+    "file": "paused_01.wav",
+    "category": "paused",
+    "subcategory": "service",
+    "expected_transcript": "I'd like to... cardiology",
+    "expected_slots": { "service": "cardiology" },
+    "notes": "1.5s pause mid-sentence — tests 900ms silence gate doesn't split"
+  },
+  {
+    "id": "paused_02",
+    "file": "paused_02.wav",
+    "category": "paused",
+    "subcategory": "date",
+    "expected_transcript": "Tomorrow... no wait... day after tomorrow",
+    "expected_slots": {},
+    "notes": "Self-correction with pauses — tests VAD doesn't finalize early"
+  },
+  {
+    "id": "paused_03",
+    "file": "paused_03.wav",
+    "category": "paused",
+    "subcategory": "name",
+    "expected_transcript": "My name is... Abhilash Kumar",
+    "expected_slots": { "name": "Abhilash Kumar" },
+    "notes": "Thinking pause before name"
+  },
+  {
+    "id": "noisy_01",
+    "file": "noisy_01.wav",
+    "category": "noisy",
+    "subcategory": "service",
+    "expected_transcript": "I need a dentist appointment",
+    "expected_slots": { "service": "dentist" },
+    "notes": "TV audio in background at moderate volume"
+  },
+  {
+    "id": "noisy_02",
+    "file": "noisy_02.wav",
+    "category": "noisy",
+    "subcategory": "date_time",
+    "expected_transcript": "Next Monday at 2 PM",
+    "expected_slots": { "time": "14:00" },
+    "notes": "Traffic noise outside — tests EMA recalibration"
+  },
+  {
+    "id": "noisy_03",
+    "file": "noisy_03.wav",
+    "category": "noisy",
+    "subcategory": "service",
+    "expected_transcript": "Orthopedic consultation please",
+    "expected_slots": { "service": "orthopedic" },
+    "notes": "Constant fan/AC hum — tests adaptive noise floor"
+  },
+  {
+    "id": "noisy_04",
+    "file": "noisy_04.wav",
+    "category": "noisy",
+    "subcategory": "service",
+    "expected_transcript": "Book me an appointment",
+    "expected_slots": {},
+    "notes": "Another person talking nearby — cross-talk test"
+  },
+  {
+    "id": "domain_01",
+    "file": "domain_01.wav",
+    "category": "domain",
+    "subcategory": "time",
+    "expected_transcript": "Half past ten",
+    "expected_slots": { "time": "10:30" },
+    "notes": "Non-standard time format — NLU must parse 'half past'"
+  },
+  {
+    "id": "domain_02",
+    "file": "domain_02.wav",
+    "category": "domain",
+    "subcategory": "date",
+    "expected_transcript": "Day after tomorrow",
+    "expected_slots": {},
+    "notes": "Relative date — NLU must resolve to ISO date"
+  },
+  {
+    "id": "domain_03",
+    "file": "domain_03.wav",
+    "category": "domain",
+    "subcategory": "date",
+    "expected_transcript": "Next Tuesday",
+    "expected_slots": {},
+    "notes": "Relative weekday — NLU must compute correct ISO date"
+  },
+  {
+    "id": "domain_04",
+    "file": "domain_04.wav",
+    "category": "domain",
+    "subcategory": "service",
+    "expected_transcript": "Ophthalmology checkup",
+    "expected_slots": { "service": "ophthalmology" },
+    "notes": "Long technical word — common Whisper mishear target"
+  },
+  {
+    "id": "domain_05",
+    "file": "domain_05.wav",
+    "category": "domain",
+    "subcategory": "service",
+    "expected_transcript": "I need a neuro surgery",
+    "expected_slots": { "service": "neurosurgery" },
+    "notes": "Two-word compound — must map to single service name"
+  },
+  {
+    "id": "domain_06",
+    "file": "domain_06.wav",
+    "category": "domain",
+    "subcategory": "confirmation",
+    "expected_transcript": "haan theek hai",
+    "expected_slots": { "confirmation": "yes" },
+    "notes": "Telugu/Hindi affirmative — tests language-pinned Whisper decoding"
+  },
+  {
+    "id": "domain_07",
+    "file": "domain_07.wav",
+    "category": "domain",
+    "subcategory": "time",
+    "expected_transcript": "10 o'clock in the morning",
+    "expected_slots": { "time": "10:00" },
+    "notes": "Verbose time phrasing"
+  },
+  {
+    "id": "domain_08",
+    "file": "domain_08.wav",
+    "category": "domain",
+    "subcategory": "phone",
+    "expected_transcript": "nine eight seven six five four three two one zero",
+    "expected_slots": { "phone": "9876543210" },
+    "notes": "Phone number spoken as individual words"
+  },
+  {
+    "id": "silence_01",
+    "file": "silence_01.wav",
+    "category": "silence",
+    "subcategory": "long_silence",
+    "expected_transcript": "",
+    "expected_slots": {},
+    "notes": "7 seconds of pure silence — should produce empty transcript, no crash"
+  },
+  {
+    "id": "silence_02",
+    "file": "silence_02.wav",
+    "category": "silence",
+    "subcategory": "delayed_response",
+    "expected_transcript": "hello",
+    "expected_slots": {},
+    "notes": "3s silence then 'hello' — tests inactivity check-in timing"
+  },
+  {
+    "id": "device_bt_01",
+    "file": "device_bt_01.wav",
+    "category": "device",
+    "subcategory": "bluetooth",
+    "expected_transcript": "I need a cardiology appointment",
+    "expected_slots": { "service": "cardiology" },
+    "notes": "Same phrase as clean_01 recorded via Bluetooth headset — A2DP quality"
+  },
+  {
+    "id": "device_laptop_01",
+    "file": "device_laptop_01.wav",
+    "category": "device",
+    "subcategory": "laptop_mic",
+    "expected_transcript": "I need a cardiology appointment",
+    "expected_slots": { "service": "cardiology" },
+    "notes": "Same phrase as clean_01 recorded via built-in laptop mic"
+  },
+  {
+    "id": "device_wired_01",
+    "file": "device_wired_01.wav",
+    "category": "device",
+    "subcategory": "wired_headset",
+    "expected_transcript": "I need a cardiology appointment",
+    "expected_slots": { "service": "cardiology" },
+    "notes": "Same phrase as clean_01 recorded via wired headset (reference baseline)"
+  }
+]

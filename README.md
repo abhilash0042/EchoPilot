@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/phosphor-icons/core/main/assets/regular/heartbeat.svg" width="80" height="80" alt="Lumina Health Logo">
+  <img src="https://raw.githubusercontent.com/phosphor-icons/core/main/assets/regular/heartbeat.svg" width="80" height="80" alt="Meridian Health Logo">
   <h1>🎙️ EchoPilot</h1>
   <p><strong>A 100% Local, Low-Latency AI Voice Receptionist</strong></p>
 

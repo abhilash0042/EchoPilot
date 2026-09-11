@@ -1,5 +1,5 @@
 """
-Database Seeding Script for Lumina Health AI Voice Agent
+Database Seeding Script for Meridian Health AI Voice Agent
 Populates realistic sample data including sensitive hospital records and customer/patient health records.
 """
 
@@ -46,7 +46,7 @@ def seed_database(force_refresh: bool = False):
         direct_phone, email, address, billing_gateway_key
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        "Lumina Health Multi-Speciality Medical Center",
+        "Meridian Health Multi-Speciality Medical Center",
         "Downtown Medical Plaza - Main Campus",
         "REG-MED-2024-88492-CA",                        # Sensitive: State Medical Board Registration
         "XX-9824109",                                   # Sensitive: Federal Tax EIN
@@ -54,7 +54,7 @@ def seed_database(force_refresh: bool = False):
         "HIPAA-AUDIT-CERT-9481-2025-VALID",            # Sensitive: HIPAA Compliance Audit Key
         "+1 (800) 555-9110 (Direct ER Triage)",
         "+1 (555) 234-5678",
-        "admin.secure@luminahealthclinic.org",
+        "admin.secure@meridianhealthclinic.org",
         "742 Evergreen Medical Blvd, Suite 400, San Francisco, CA 94102",
         "sec_live_94819a8fbc2901c8e77402f1a"           # Sensitive: Merchant Billing API Token
     ))
@@ -72,7 +72,7 @@ def seed_database(force_refresh: bool = False):
             250.00,
             "Mon,Tue,Wed,Thu,Fri",
             "09:00 - 17:00",
-            "dr.sarah.lin@luminahealthclinic.org"
+            "dr.sarah.lin@meridianhealthclinic.org"
         ),
         (
             hospital_id,
@@ -83,7 +83,7 @@ def seed_database(force_refresh: bool = False):
             150.00,
             "Mon,Tue,Wed,Thu,Fri,Sat",
             "08:30 - 18:00",
-            "dr.rajesh.mehta@luminahealthclinic.org"
+            "dr.rajesh.mehta@meridianhealthclinic.org"
         ),
         (
             hospital_id,
@@ -94,7 +94,7 @@ def seed_database(force_refresh: bool = False):
             175.00,
             "Mon,Wed,Thu,Fri",
             "09:00 - 16:30",
-            "dr.emily.chen@luminahealthclinic.org"
+            "dr.emily.chen@meridianhealthclinic.org"
         ),
         (
             hospital_id,
@@ -105,7 +105,7 @@ def seed_database(force_refresh: bool = False):
             275.00,
             "Tue,Thu,Fri",
             "10:00 - 18:00",
-            "dr.marcus.vance@luminahealthclinic.org"
+            "dr.marcus.vance@meridianhealthclinic.org"
         ),
         (
             hospital_id,
@@ -116,7 +116,7 @@ def seed_database(force_refresh: bool = False):
             200.00,
             "Mon,Tue,Thu,Sat",
             "09:00 - 17:30",
-            "dr.priya.sharma@luminahealthclinic.org"
+            "dr.priya.sharma@meridianhealthclinic.org"
         ),
         (
             hospital_id,
@@ -127,7 +127,7 @@ def seed_database(force_refresh: bool = False):
             140.00,
             "Mon,Tue,Wed,Thu,Fri",
             "08:00 - 16:00",
-            "dr.alex.ross@luminahealthclinic.org"
+            "dr.alex.ross@meridianhealthclinic.org"
         )
     ]
 
@@ -166,7 +166,7 @@ def seed_database(force_refresh: bool = False):
             "+1 (555) 432-8921",
             "j.davis84@example.com",
             "1984-04-12",
-            "MRN-84920-LUM",                             # Sensitive: Hospital Medical Record Number
+            "MRN-84920-MER",                             # Sensitive: Hospital Medical Record Number
             "8492",                                      # Sensitive: SSN Last 4
             "O+",                                        # Sensitive: Blood Group
             "Penicillin (Anaphylaxis), Amoxicillin",      # Sensitive: Medical Allergies
@@ -183,7 +183,7 @@ def seed_database(force_refresh: bool = False):
             "+1 (555) 871-3490",
             "sophia.martinez@example.com",
             "1992-09-28",
-            "MRN-39102-LUM",
+            "MRN-39102-MER",
             "1294",
             "A-",
             "Sulfa Drugs, Aspirin",
@@ -200,7 +200,7 @@ def seed_database(force_refresh: bool = False):
             "+1 (555) 239-6612",
             "mchang.tech@example.com",
             "1978-11-05",
-            "MRN-58291-LUM",
+            "MRN-58291-MER",
             "7301",
             "B+",
             "No Known Drug Allergies (NKDA)",
@@ -217,7 +217,7 @@ def seed_database(force_refresh: bool = False):
             "+1 (555) 902-1144",
             "sam.reed.designer@example.com",
             "1995-03-17",
-            "MRN-19482-LUM",
+            "MRN-19482-MER",
             "4419",
             "AB+",
             "Latex, Codeine",
@@ -234,7 +234,7 @@ def seed_database(force_refresh: bool = False):
             "+1 (555) 789-0123",
             "abhilash.rao@example.com",
             "1996-07-22",
-            "MRN-77391-LUM",
+            "MRN-77391-MER",
             "9932",
             "O+",
             "NKDA (No known drug allergies)",
@@ -275,7 +275,7 @@ def seed_database(force_refresh: bool = False):
 
     appointments_data = [
         (
-            "LUM-10492",
+            "MER-10492",
             patients_map.get("Johnathan Davis"),
             doctors.get("Cardiology"),
             services_map.get("Cardiology Consultation"),
@@ -287,7 +287,7 @@ def seed_database(force_refresh: bool = False):
             "Follow-up for blood pressure medication review. Patient requested morning slot."
         ),
         (
-            "LUM-10493",
+            "MER-10493",
             patients_map.get("Sophia Martinez"),
             doctors.get("General Medicine"),
             services_map.get("General Checkup"),
@@ -299,7 +299,7 @@ def seed_database(force_refresh: bool = False):
             "Annual health assessment and routine prescription refill."
         ),
         (
-            "LUM-10494",
+            "MER-10494",
             patients_map.get("Michael Chang"),
             doctors.get("Orthopedics"),
             services_map.get("Orthopedic Evaluation"),
@@ -311,7 +311,7 @@ def seed_database(force_refresh: bool = False):
             "Lower back stiffness after sports activity."
         ),
         (
-            "LUM-10495",
+            "MER-10495",
             patients_map.get("Samantha Reed"),
             doctors.get("Dermatology"),
             services_map.get("Dermatology Skin Exam"),
@@ -343,9 +343,9 @@ def seed_database(force_refresh: bool = False):
             "+1 (555) 432-8921",
             "Johnathan Davis",
             "Cardiology Consultation",
-            appts.get("LUM-10492"),
+            appts.get("MER-10492"),
             42,
-            "User: Hi, I'd like to book a cardiology appointment.\nAssistant: Hey there! I'm Lumina from the health clinic...\nUser: Tomorrow at 10 AM.\nAssistant: Awesome! Can I get your name please?\nUser: Johnathan Davis, phone 555-432-8921.\nAssistant: Booking confirmed for Cardiology with Dr. Sarah Lin!",
+            "User: Hi, I'd like to book a cardiology appointment.\nAssistant: Hey there! I'm Elena from the health clinic...\nUser: Tomorrow at 10 AM.\nAssistant: Awesome! Can I get your name please?\nUser: Johnathan Davis, phone 555-432-8921.\nAssistant: Booking confirmed for Cardiology with Dr. Sarah Lin!",
             "COMPLETED"
         ),
         (
@@ -353,7 +353,7 @@ def seed_database(force_refresh: bool = False):
             "+1 (555) 871-3490",
             "Sophia Martinez",
             "General Checkup",
-            appts.get("LUM-10493"),
+            appts.get("MER-10493"),
             38,
             "User: I need a general checkup tomorrow afternoon.\nAssistant: Got it! What time would you like to come in?\nUser: 2 PM please. Sophia Martinez.\nAssistant: Confirmed for 2 PM!",
             "COMPLETED"

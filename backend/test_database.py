@@ -1,5 +1,5 @@
 """
-Automated Verification & Integrity Tests for Lumina Health Database
+Automated Verification & Integrity Tests for Meridian Health Database
 Tests database queries, relations, sensitive records, and booking store integration.
 """
 
@@ -27,7 +27,7 @@ class TestHealthcareDatabase(unittest.TestCase):
         hospitals = database.get_all_hospitals()
         self.assertGreater(len(hospitals), 0, "Hospital record should exist")
         h = hospitals[0]
-        self.assertIn("Lumina", h["name"])
+        self.assertIn("Meridian", h["name"])
         # Verify sensitive hospital fields
         self.assertTrue(bool(h["registration_number"]), "Sensitive: Registration number should be present")
         self.assertTrue(bool(h["tax_id_ein"]), "Sensitive: Tax ID / EIN should be present")
@@ -113,5 +113,5 @@ class TestHealthcareDatabase(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    print("\n--- RUNNING LUMINA HEALTHCARE DATABASE VERIFICATION TESTS ---")
+    print("\n--- RUNNING MERIDIAN HEALTHCARE DATABASE VERIFICATION TESTS ---")
     unittest.main(verbosity=2)
