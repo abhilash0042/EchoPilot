@@ -188,8 +188,10 @@ async function startStreaming(stream) {
     // This callback fires on the MAIN thread (safe for WS send), but the conversion
     // and buffering already happened off-thread inside the AudioWorklet.
     workletNode.port.onmessage = (event) => {
-        // Continuous streaming: keep sending even while assistantSpeaking is true!
         if (!isConnected || ws.readyState !== WebSocket.OPEN) return;
+        // Pause mic transmission while Elena is speaking: prevents speaker feedback,
+        // stops voice cutting off mid-sentence, and ensures zero echo in STT.
+        if (assistantSpeaking) return;
         ws.send(event.data);  // event.data is an ArrayBuffer (Int16Array buffer, zero-copy transfer)
     };
 

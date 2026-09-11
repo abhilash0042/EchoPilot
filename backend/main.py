@@ -312,9 +312,8 @@ async def audio_socket(websocket: WebSocket):
         while True:
             message = await websocket.receive()
             if "bytes" in message:
-                # Drop audio chunks during interrupt cooldown window to prevent
-                # TTS tail-echo from entering the fresh transcription buffer
-                if time.time() >= session.interrupt_cooldown_until:
+                # Discard audio chunks while assistant is speaking to prevent speaker echo leakage
+                if not session.assistant_speaking and time.time() >= session.interrupt_cooldown_until:
                     session.add_chunk(message["bytes"])
             elif "text" in message:
                 try:
@@ -323,6 +322,7 @@ async def audio_socket(websocket: WebSocket):
                         session.assistant_speaking = False
                         session.last_speech_or_prompt_time = time.time()
                         session.inactivity_check_count = 0
+                        session.reset_after_transcript()  # Clear any residual speaker leak
                         if not session.interrupted:
                             await websocket.send_json({"type": "status", "message": "listening"})
                 except Exception as e:
@@ -483,16 +483,14 @@ async def audio_socket(websocket: WebSocket):
                         transcription = groq_client.audio.transcriptions.create(
                             file=wav_io,
                             model="whisper-large-v3",
-                            # Do not pin language="en" — allows Whisper to auto-detect Telugu/English and prevents phonetic gibberish
+                            language="en",            # Pin language to English — prevents foreign language subtitle hallucinations
                             temperature=0,            # deterministic output — eliminates non-determinism as a failure source
                             response_format="verbose_json",
                             prompt=(
-                                "Healthcare voice conversation in English, Telugu, and Hindi at Meridian Clinic. "
+                                "Healthcare voice conversation in English at Meridian Clinic. "
                                 "Appointment with doctor, general physician, doctor consultation, checkup, head surgery, surgery, brain surgery, "
                                 "cardiology, dermatology, orthopedic, pediatric, ophthalmology, dentist, blood test, X-ray, "
                                 "tomorrow, Monday, Tuesday, Wednesday, morning, afternoon, evening, 10 AM, 11 AM, 2 PM, "
-                                "నమస్కారం, అవును, కాదు, రేపు, ఎల్లుండి, సమయం, డాక్టర్, "
-                                "haan, nahi, theek hai, kal, parso, subah, dopahar, sham, "
                                 "Abhilash, confirm, cancel, change."
                             ),
                             timeout=GROQ_TIMEOUT_SECONDS,
@@ -553,17 +551,15 @@ async def audio_socket(websocket: WebSocket):
                         pcm_float = final_pcm.astype(np.float32) / 32768.0  # use final_pcm
                         segments, _ = local_model.transcribe(
                             pcm_float,
-                            # language=None allows auto-detection of Telugu/English on local model
+                            language="en",   # Pin language to English
                             temperature=0,   # deterministic output — matches Groq config
                             vad_filter=False,  # our RMS VAD already gated this segment — Silero re-trimming would clip word edges
                             beam_size=5,
                             initial_prompt=(
-                                "Healthcare voice conversation in English and Telugu at Meridian Clinic. "
+                                "Healthcare voice conversation in English at Meridian Clinic. "
                                 "Appointment with doctor, general physician, doctor consultation, checkup, head surgery, surgery, brain surgery, "
                                 "cardiology, dermatology, orthopedic, pediatric, ophthalmology, dentist, "
                                 "tomorrow, Monday, Tuesday, Wednesday, morning, afternoon, evening, "
-                                "నమస్కారం, అవును, కాదు, రేపు, ఎల్లుండి, సమయం, డాక్టర్, "
-                                "haan, nahi, theek hai, kal, parso, subah, dopahar, sham, "
                                 "Abhilash, confirm, cancel, change."
                             ),
                         )
@@ -577,22 +573,23 @@ async def audio_socket(websocket: WebSocket):
 
                 
                 # Filter Whisper hallucinations — only block clear YouTube-style noise
-                # and silent-segment hallucinations ("Thank you.", "hmm", etc.)
-                # NOT valid single-word responses like "haan", "okay", "nahi" that users
-                # genuinely say in a healthcare booking conversation.
+                # and silent-segment hallucinations ("Thank you.", "hmm", subtitle credits, etc.)
                 HALLUCINATION_SUBSTRINGS = [
                     "thank you for watching", "subscribe to our", "thanks for watching",
-                    "please subscribe", "like and subscribe",
+                    "please subscribe", "like and subscribe", "субтитри", "субтитры",
                 ]
                 HALLUCINATION_EXACT = {
                     "hmm", "hmm.", "uh.", "uh", "um.", "um",
                     "thank you", "thank you.", "thanks", "thanks.",
                     "thank you very much", "thank you very much.",
-                    "you", "you.", "bye", "bye."
+                    "you", "you.", "bye", "bye.", "дякую", "дякую.",
                 }
                 t_lower = text.lower().strip()
+                # Check for Cyrillic/Russian/Ukrainian subtitle hallucinations (e.g. "Субтитрувальниця Оля Шор")
+                has_cyrillic = any('\u0400' <= char <= '\u04ff' for char in text)
                 is_hallucination = (
                     len(t_lower) < 2
+                    or has_cyrillic
                     or t_lower in HALLUCINATION_EXACT
                     or any(p in t_lower for p in HALLUCINATION_SUBSTRINGS)
                 )
