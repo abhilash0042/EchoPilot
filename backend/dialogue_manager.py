@@ -33,6 +33,19 @@ def handle_turn(session: BookingSession, user_text: str) -> str:
             add_to_history("user", user_text)  # ← was missing: track successful extraction
             session.advance()
         else:
+            # Check for pure politeness/gratitude to prevent "You're very welcome!" loops
+            clean_text = user_text.strip().lower().rstrip(".!?,")
+            politeness_tokens = {
+                "thank you", "thanks", "thank you so much", "thank you very much",
+                "thx", "okay thank you", "ok thank you", "i want to thank you",
+                "thank you and thank others"
+            }
+            if clean_text in politeness_tokens or clean_text.startswith("thank you"):
+                reply = f"Happy to help! {PROMPTS[session.state]}"
+                add_to_history("user", user_text)
+                add_to_history("assistant", reply)
+                return reply
+
             # Couldn't extract — use LLM to chit-chat and steer back naturally
             reply = get_conversational_reply(user_text, PROMPTS[session.state])
             add_to_history("user", user_text)

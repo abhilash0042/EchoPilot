@@ -339,15 +339,15 @@ async def audio_socket(websocket: WebSocket):
 
             # --- Barge-in check: only relevant while the assistant is speaking ---
             if session.assistant_speaking:
-                barge_threshold = max(session.speech_threshold, 200.0)
+                barge_threshold = max(session.speech_threshold * 1.8, 350.0)
                 speaking_detected = has_speech(pcm, window_ms=150, threshold=barge_threshold)
                 if speaking_detected:
                     session.barge_in_speech_ms += 150
                     if session.barge_in_speech_ms >= BARGE_IN_CONFIRM_MS and not session.interrupted:
                         session.interrupted = True
                         session.assistant_speaking = False
-                        # Set a 150ms cooldown so TTS tail audio doesn't enter the fresh buffer
-                        session.interrupt_cooldown_until = time.time() + 0.15
+                        # Set a 200ms cooldown so TTS tail audio doesn't enter the fresh buffer
+                        session.interrupt_cooldown_until = time.time() + 0.20
                         await websocket.send_json({"type": "interrupt"})
                         await websocket.send_json({"type": "status", "message": "listening"})
 
@@ -483,14 +483,15 @@ async def audio_socket(websocket: WebSocket):
                         transcription = groq_client.audio.transcriptions.create(
                             file=wav_io,
                             model="whisper-large-v3",
-                            language="en",            # pin language — prevents wrong-language decode on short utterances
+                            # Do not pin language="en" — allows Whisper to auto-detect Telugu/English and prevents phonetic gibberish
                             temperature=0,            # deterministic output — eliminates non-determinism as a failure source
                             response_format="verbose_json",
                             prompt=(
-                                "Healthcare voice conversation in English and Telugu at Meridian Clinic. "
+                                "Healthcare voice conversation in English, Telugu, and Hindi at Meridian Clinic. "
                                 "Appointment with doctor, general physician, doctor consultation, checkup, head surgery, surgery, brain surgery, "
                                 "cardiology, dermatology, orthopedic, pediatric, ophthalmology, dentist, blood test, X-ray, "
                                 "tomorrow, Monday, Tuesday, Wednesday, morning, afternoon, evening, 10 AM, 11 AM, 2 PM, "
+                                "నమస్కారం, అవును, కాదు, రేపు, ఎల్లుండి, సమయం, డాక్టర్, "
                                 "haan, nahi, theek hai, kal, parso, subah, dopahar, sham, "
                                 "Abhilash, confirm, cancel, change."
                             ),
@@ -552,7 +553,7 @@ async def audio_socket(websocket: WebSocket):
                         pcm_float = final_pcm.astype(np.float32) / 32768.0  # use final_pcm
                         segments, _ = local_model.transcribe(
                             pcm_float,
-                            language="en",   # pin language on local model too
+                            # language=None allows auto-detection of Telugu/English on local model
                             temperature=0,   # deterministic output — matches Groq config
                             vad_filter=False,  # our RMS VAD already gated this segment — Silero re-trimming would clip word edges
                             beam_size=5,
@@ -561,6 +562,7 @@ async def audio_socket(websocket: WebSocket):
                                 "Appointment with doctor, general physician, doctor consultation, checkup, head surgery, surgery, brain surgery, "
                                 "cardiology, dermatology, orthopedic, pediatric, ophthalmology, dentist, "
                                 "tomorrow, Monday, Tuesday, Wednesday, morning, afternoon, evening, "
+                                "నమస్కారం, అవును, కాదు, రేపు, ఎల్లుండి, సమయం, డాక్టర్, "
                                 "haan, nahi, theek hai, kal, parso, subah, dopahar, sham, "
                                 "Abhilash, confirm, cancel, change."
                             ),
@@ -574,14 +576,20 @@ async def audio_socket(websocket: WebSocket):
                             print("[STT] Groq circuit breaker CLOSED — will retry Groq next turn")
 
                 
-                # Filter Whisper hallucinations — only block clear YouTube-style noise,
+                # Filter Whisper hallucinations — only block clear YouTube-style noise
+                # and silent-segment hallucinations ("Thank you.", "hmm", etc.)
                 # NOT valid single-word responses like "haan", "okay", "nahi" that users
                 # genuinely say in a healthcare booking conversation.
                 HALLUCINATION_SUBSTRINGS = [
                     "thank you for watching", "subscribe to our", "thanks for watching",
                     "please subscribe", "like and subscribe",
                 ]
-                HALLUCINATION_EXACT = {"hmm", "hmm.", "uh.", "uh", "um.", "um"}
+                HALLUCINATION_EXACT = {
+                    "hmm", "hmm.", "uh.", "uh", "um.", "um",
+                    "thank you", "thank you.", "thanks", "thanks.",
+                    "thank you very much", "thank you very much.",
+                    "you", "you.", "bye", "bye."
+                }
                 t_lower = text.lower().strip()
                 is_hallucination = (
                     len(t_lower) < 2

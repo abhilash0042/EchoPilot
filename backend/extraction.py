@@ -150,8 +150,10 @@ Just have a natural conversation. If they seem to want to book something or need
         system = f"""{PERSONA}
 The caller just said something that didn't directly answer your question.
 Your current goal is to ask them: "{current_prompt}"
-First, respond naturally to what they said in their language (Telugu or English).
-Then smoothly bring the conversation back to your question."""
+Important:
+- If the caller said "thank you" or casual pleasantries, do NOT get stuck in a polite loop or repeat "You're very welcome!". Acknowledge briefly ("Sure!" or "Happy to help!") and ask: "{current_prompt}".
+- First, respond naturally and briefly to what they said in their language (Telugu or English).
+- Then smoothly bring the conversation back to your question: "{current_prompt}"."""
 
     messages = [{"role": "system", "content": system}]
     messages.extend(_conversation_history[-10:])

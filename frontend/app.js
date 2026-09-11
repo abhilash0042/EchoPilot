@@ -114,12 +114,16 @@ async function startCall() {
                 }
                 
                 if (data.type === "interrupt") {
-                    if (currentSource) {
+                    if (currentAudio) {
                         try {
-                            currentSource.onended = null;
-                            currentSource.stop();
+                            currentAudio.onended = null;
+                            currentAudio.onerror = null;
+                            currentAudio.pause();
+                            if (currentAudio.src && currentAudio.src.startsWith('blob:')) {
+                                URL.revokeObjectURL(currentAudio.src);
+                            }
                         } catch (e) { /* ignore */ }
-                        currentSource = null;
+                        currentAudio = null;
                     }
                     assistantSpeaking = false;
                     visualizerEl.classList.remove('speaking');
@@ -193,42 +197,65 @@ async function startStreaming(stream) {
     // Note: workletNode has numberOfOutputs=0, so no further connect() needed.
 }
 
-let currentSource = null;  // Track currently playing audio to prevent overlap
+let currentAudio = null;  // Track currently playing HTMLAudioElement (enables browser AEC reference)
 
 async function playReceivedAudio(blob) {
-    // Use the dedicated playback context (NOT the 16kHz recording context)
-    if (!playbackContext) return;
-    
     try {
         // Stop any currently playing audio to prevent overlapping voices
-        if (currentSource) {
+        if (currentAudio) {
             try {
-                currentSource.onended = null;  // Remove callback before stopping
-                currentSource.stop();
+                currentAudio.onended = null;
+                currentAudio.onerror = null;
+                currentAudio.pause();
+                if (currentAudio.src && currentAudio.src.startsWith('blob:')) {
+                    URL.revokeObjectURL(currentAudio.src);
+                }
             } catch (e) { /* already stopped */ }
+            currentAudio = null;
         }
 
-        const arrayBuffer = await blob.arrayBuffer();
-        const audioBuffer = await playbackContext.decodeAudioData(arrayBuffer);
-        
-        const source = playbackContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(playbackContext.destination);
-        source.onended = () => {
-            // Signal that speaking is done so mic can resume
-            currentSource = null;
+        // Create an object URL from the audio blob (MP3/WAV)
+        // Routing through HTMLAudioElement allows Chromium/WebKit WebRTC AEC to hook into the playback stream
+        const audioUrl = URL.createObjectURL(blob);
+        const audio = new Audio(audioUrl);
+        currentAudio = audio;
+
+        audio.onended = () => {
+            if (currentAudio === audio) {
+                currentAudio = null;
+            }
+            URL.revokeObjectURL(audioUrl);
             assistantSpeaking = false;
             visualizerEl.classList.remove('speaking');
             callInterface.classList.remove('speaking-state');
-            if (isConnected && ws.readyState === WebSocket.OPEN) {
+            if (isConnected && ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({type: "playback_ended"}));
             }
         };
-        currentSource = source;
-        source.start(0);
+
+        audio.onerror = (err) => {
+            console.error("Audio playback error:", err);
+            if (currentAudio === audio) {
+                currentAudio = null;
+            }
+            URL.revokeObjectURL(audioUrl);
+            assistantSpeaking = false;
+            visualizerEl.classList.remove('speaking');
+            callInterface.classList.remove('speaking-state');
+        };
+
+        await audio.play();
     } catch (err) {
         console.error("Error playing TTS audio:", err);
-        currentSource = null;
+        if (currentAudio) {
+            try {
+                currentAudio.pause();
+                if (currentAudio.src && currentAudio.src.startsWith('blob:')) {
+                    URL.revokeObjectURL(currentAudio.src);
+                }
+            } catch (e) {}
+            currentAudio = null;
+        }
         assistantSpeaking = false;
         visualizerEl.classList.remove('speaking');
         callInterface.classList.remove('speaking-state');
@@ -240,6 +267,18 @@ function endCall() {
     assistantSpeaking = false;
     visualizerEl.classList.remove('speaking');
     callInterface.classList.remove('speaking-state');
+
+    if (currentAudio) {
+        try {
+            currentAudio.onended = null;
+            currentAudio.onerror = null;
+            currentAudio.pause();
+            if (currentAudio.src && currentAudio.src.startsWith('blob:')) {
+                URL.revokeObjectURL(currentAudio.src);
+            }
+        } catch (e) {}
+        currentAudio = null;
+    }
     
     if (callTimerInterval) {
         clearInterval(callTimerInterval);
@@ -266,7 +305,7 @@ function endCall() {
         ws = null;
     }
     
-    // Close BOTH audio contexts
+    // Close audio context
     if (audioContext) {
         audioContext.close();
         audioContext = null;
