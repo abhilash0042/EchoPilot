@@ -474,7 +474,8 @@ function startUserAudioMonitor() {
                 }
                 clientBargeInSpeechFrames = 0;
             }
-        } else if (!assistantSpeaking) {
+        } else {
+            // Reset consecutive counter when energy drops below speech threshold
             clientBargeInSpeechFrames = 0;
         }
         
