@@ -270,14 +270,19 @@ def get_peak_rms(pcm: np.ndarray, frame_ms: int = 30) -> float:
 
 
 async def speak(websocket: WebSocket, session: AudioSession, text: str):
-    """Sends TTS audio, but checks after synthesis whether an interrupt
-    already happened before playing."""
+    """Sends TTS audio, ensuring blank/empty messages are never spoken or rendered."""
+    if not text or not str(text).strip():
+        print("[speak] Warning: Blank response rejected; returning to listening state.")
+        await websocket.send_json({"type": "status", "message": "listening"})
+        return
+
+    clean_text = str(text).strip()
     session.assistant_speaking = True
     session.barge_in_speech_ms = 0
     session.interrupted = False
     session.last_speech_or_prompt_time = time.time()
 
-    await websocket.send_json({"type": "transcript", "text": text, "final": True, "speaker": "assistant"})
+    await websocket.send_json({"type": "transcript", "text": clean_text, "final": True, "speaker": "assistant"})
     await websocket.send_json({"type": "status", "message": "speaking"})
 
     try:
@@ -411,19 +416,12 @@ async def audio_socket(websocket: WebSocket):
                           f"noise_floor={session.noise_floor_rms:.1f}, "
                           f"speech_threshold={session.speech_threshold:.1f}")
 
-            # --- 7-Second Inactivity / Silence Check-In ---
-            if not session.last_frame_had_speech and (now - session.last_speech_or_prompt_time > 7.0):
+            # --- Inactivity / Silence Check-In (Relaxed to 25s so user is never interrupted prematurely) ---
+            if not session.last_frame_had_speech and (now - session.last_speech_or_prompt_time > 25.0):
                 if session.inactivity_check_count == 0:
                     session.inactivity_check_count = 1
                     session.last_speech_or_prompt_time = now
-                    check_in = "Are you there? Take your time, I'm right here!"
-                    transcript_history.append(f"Assistant: {check_in}")
-                    await speak(websocket, session, check_in)
-                    continue
-                elif session.inactivity_check_count == 1 and (now - session.last_speech_or_prompt_time > 9.0):
-                    session.inactivity_check_count = 2
-                    session.last_speech_or_prompt_time = now
-                    check_in = "Hello! Can you hear me okay? Just let me know whenever you're ready!"
+                    check_in = "Take your time! Whenever you're ready, let me know what day works best for you."
                     transcript_history.append(f"Assistant: {check_in}")
                     await speak(websocket, session, check_in)
                     continue
@@ -442,28 +440,19 @@ async def audio_socket(websocket: WebSocket):
                 session.last_frame_had_speech = False
                 session.user_speaking_start_time = 0
 
-                if len(final_pcm) < 1600:
-                    # Less than 0.1s of audio — noise or tiny click, safely ignore
+                if len(final_pcm) < 4000:
+                    # Less than 0.25s of audio — noise, breath, or tiny click, safely ignore
                     await websocket.send_json({"type": "status", "message": "listening"})
                     continue
 
-                # Guard against Whisper hallucinating on pure silence or ambient room hum.
-                # Whisper-family models commonly hallucinate stock phrases ("Thank you for watching")
-                # when given silent audio buffers.
-                #
-                # IMPORTANT: We check PEAK frame RMS (over 30ms frames), NOT whole-buffer average.
-                # A buffer with a real but quiet word (e.g. 200ms speech) followed by 900ms of
-                # trailing silence has a low buffer-wide average RMS, which would falsely drop genuine
-                # utterances. Peak frame RMS ensures that if ANY window had speech-level energy, we
-                # transcribe it.
+                # Robust gate against Whisper hallucinating on ambient background room noise or laptop fan hiss.
                 peak_rms = get_peak_rms(final_pcm, frame_ms=30)
-                silence_threshold = max(session.noise_floor_rms * 1.5, 120.0)
+                silence_threshold = max(session.noise_floor_rms * 2.0, float(os.getenv("MIN_SILENCE_THRESHOLD", "220.0")))
                 if peak_rms < silence_threshold:
                     duration_s = len(final_pcm) / SAMPLE_RATE
                     print(
-                        f"[STT] Skipping transcription — audio energy below speech threshold "
-                        f"(peak_rms={peak_rms:.1f} < threshold={silence_threshold:.1f}, "
-                        f"noise_floor={session.noise_floor_rms:.1f}, duration={duration_s:.2f}s)"
+                        f"[STT] Filtered ambient silence/noise (peak_rms={peak_rms:.1f} < threshold={silence_threshold:.1f}, "
+                        f"noise_floor={session.noise_floor_rms:.1f}, duration={duration_s:.2f}s) — Whisper skipped"
                     )
                     await websocket.send_json({"type": "status", "message": "listening"})
                     continue
@@ -609,6 +598,10 @@ async def audio_socket(websocket: WebSocket):
                 else:
                     reply_text = handle_turn(booking_session, text)
                 
+                if not reply_text or not str(reply_text).strip():
+                    current_st = booking_session.state
+                    reply_text = PROMPTS.get(current_st, "Could you please repeat that? What can I help you with today?")
+
                 llm_ms = int((time.time() - t0) * 1000)
                 print(f"[LLM Result ({llm_ms}ms)] '{reply_text}'")
 

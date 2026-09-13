@@ -239,6 +239,10 @@ let currentAudio = null;  // Track currently playing HTMLAudioElement (enables b
 
 async function playReceivedAudio(blob) {
     try {
+        if (!blob || (blob.size && blob.size < 200)) {
+            console.warn("[playReceivedAudio] Empty or truncated audio blob, skipping");
+            return;
+        }
         // Stop any currently playing audio to prevent overlapping voices
         if (currentAudio) {
             try {
@@ -430,6 +434,10 @@ document.addEventListener('keydown', (e) => {
 
 function appendTranscriptLine(speaker, text) {
     removeThinkingIndicator(); // Just in case
+    if (!text || !String(text).trim()) {
+        console.warn("[appendTranscriptLine] Discarded empty text bubble");
+        return; // Never render blank speech bubbles
+    }
     // Handle both raw codes ("assistant", "user") and any labels
     const isAssistant = speaker === "assistant" || speaker === "Elena Assistant" || speaker === "Elena";
     
