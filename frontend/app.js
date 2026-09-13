@@ -227,9 +227,7 @@ async function startStreaming(stream) {
     // and buffering already happened off-thread inside the AudioWorklet.
     workletNode.port.onmessage = (event) => {
         if (!isConnected || ws.readyState !== WebSocket.OPEN) return;
-        // Pause mic transmission while Elena is speaking: prevents speaker feedback,
-        // stops voice cutting off mid-sentence, and ensures zero echo in STT.
-        if (assistantSpeaking) return;
+        // Always stream microphone PCM frames so the backend can detect user barge-in interruptions immediately!
         ws.send(event.data);  // event.data is an ArrayBuffer (Int16Array buffer, zero-copy transfer)
     };
 
@@ -427,7 +425,9 @@ function removeThinkingIndicator() {
     thinkingIndicator = null;
 }
 
-// Live User Mic Equalizer Monitor (Animates Right-Hand Side)
+// Live User Mic Equalizer Monitor (Animates Right-Hand Side & Instant Barge-In)
+let clientBargeInSpeechFrames = 0;
+
 function startUserAudioMonitor() {
     userAudioMonitorActive = true;
     const userBars = document.querySelectorAll('#user-bars .eq-bar');
@@ -441,8 +441,44 @@ function startUserAudioMonitor() {
         let sum = 0;
         for (let i = 0; i < data.length; i++) sum += data[i];
         const avg = sum / data.length;
+
+        // INSTANT CLIENT-SIDE BARGE-IN:
+        // If Elena is speaking and user starts talking into mic (energy > 20 for ~80ms):
+        if (assistantSpeaking && avg > 20) {
+            clientBargeInSpeechFrames++;
+            if (clientBargeInSpeechFrames >= 2) {
+                console.log("[Barge-in] User began speaking: immediately cutting assistant audio");
+                if (currentAudio) {
+                    try {
+                        currentAudio.onended = null;
+                        currentAudio.onerror = null;
+                        currentAudio.pause();
+                        if (currentAudio.src && currentAudio.src.startsWith('blob:')) {
+                            URL.revokeObjectURL(currentAudio.src);
+                        }
+                    } catch (e) {}
+                    currentAudio = null;
+                }
+                assistantSpeaking = false;
+                if (visualizerEl) visualizerEl.classList.remove('speaking');
+                callInterface.classList.remove('speaking-state');
+                if (podElena) podElena.classList.remove('elena-speaking');
+                if (elenaStatusText) elenaStatusText.textContent = "Listening...";
+                if (podUser) podUser.classList.add('user-speaking');
+                if (userStatusText) userStatusText.textContent = "Speaking...";
+                statusText.textContent = "🎤 Listening to you...";
+                
+                // Signal backend immediately that assistant playback was cut by user interruption
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "playback_ended" }));
+                }
+                clientBargeInSpeechFrames = 0;
+            }
+        } else if (!assistantSpeaking) {
+            clientBargeInSpeechFrames = 0;
+        }
         
-        // Active speaking detection: energy threshold and assistant is quiet
+        // Active speaking detection: energy threshold
         if (avg > 14 && !assistantSpeaking) {
             if (podUser) podUser.classList.add('user-speaking');
             if (userStatusText) userStatusText.textContent = "Speaking...";
@@ -453,7 +489,7 @@ function startUserAudioMonitor() {
                 bar.style.height = `${h}px`;
             });
         } else {
-            if (podUser) podUser.classList.remove('user-speaking');
+            if (podUser && !assistantSpeaking) podUser.classList.remove('user-speaking');
             if (userStatusText && !assistantSpeaking) userStatusText.textContent = "Mic Active";
             userBars.forEach(bar => {
                 bar.style.height = '4px';

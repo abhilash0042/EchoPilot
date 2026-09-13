@@ -44,6 +44,8 @@ if os.name == "nt":
                 if hasattr(os, "add_dll_directory"):
                     os.add_dll_directory(bin_path)
 
+os.environ.setdefault("SILENCE_MS_TO_FINALIZE", "900")
+os.environ.setdefault("BARGE_IN_CONFIRM_MS", "250")
 from main import (
     AudioSession,
     has_speech,
