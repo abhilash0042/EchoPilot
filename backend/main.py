@@ -1,5 +1,6 @@
 import io
 import time
+import asyncio
 import numpy as np
 import os
 import site
@@ -28,7 +29,16 @@ from openai import OpenAI
 from dialogue_manager import handle_turn, handle_confirmation, PROMPTS
 from booking import BookingSession, BookingState
 from tts import synthesize, warm_cache
-from extraction import add_to_history, reset_history
+from extraction import add_to_history, clean_spoken_text
+from stt import (
+    STT_MODEL,
+    STT_PROMPT,
+    cleanup_transcript,
+    groq_segment_confidence,
+    is_low_confidence,
+    pick_stt_language,
+    prepare_utterance,
+)
 import database
 from seed_data import seed_database
 from belfry_client import belfry_check_input, belfry_check_output
@@ -78,6 +88,7 @@ async def on_startup():
         # Inactivity check-ins (defined here in main.py, not in PROMPTS)
         "Still there? Take your time, I'm listening!",
         "Hello! Can you hear me okay? Just let me know whenever you're ready!",
+        "Take your time, I'm still here whenever you're ready.",
         # Common safety/fallback replies
         "I didn't quite catch that — could you say that again?",
         "I apologize, but I cannot process that request. How else may I assist you?",
@@ -152,7 +163,7 @@ SAMPLE_RATE = 16000
 FRAME_MS = 30  # webrtcvad requires 10/20/30ms frames
 FRAME_SIZE = int(SAMPLE_RATE * FRAME_MS / 1000)  # samples per VAD frame
 
-SILENCE_MS_TO_FINALIZE = int(os.getenv("SILENCE_MS_TO_FINALIZE", "500"))  # 900ms silence threshold optimized for natural pauses
+SILENCE_MS_TO_FINALIZE = int(os.getenv("SILENCE_MS_TO_FINALIZE", "900"))  # real silence before we cut the caller off
 
 
 BARGE_IN_CONFIRM_MS = int(os.getenv("BARGE_IN_CONFIRM_MS", "200"))  # Reduced from 350 for faster interrupts
@@ -276,7 +287,7 @@ async def speak(websocket: WebSocket, session: AudioSession, text: str):
         await websocket.send_json({"type": "status", "message": "listening"})
         return
 
-    clean_text = str(text).strip()
+    clean_text = clean_spoken_text(text)
     session.assistant_speaking = True
     session.barge_in_speech_ms = 0
     session.interrupted = False
@@ -286,8 +297,12 @@ async def speak(websocket: WebSocket, session: AudioSession, text: str):
     await websocket.send_json({"type": "status", "message": "speaking"})
 
     try:
-        audio_bytes = await synthesize(text)
-        
+        audio_bytes = await synthesize(clean_text)
+        if not audio_bytes:
+            session.assistant_speaking = False
+            await websocket.send_json({"type": "status", "message": "listening"})
+            return
+
         if session.interrupted:
             # User already started talking before we finished synthesizing — skip playback
             session.assistant_speaking = False
@@ -313,7 +328,6 @@ async def audio_socket(websocket: WebSocket):
     await websocket.accept()
     session = AudioSession()
     booking_session = BookingSession()
-    reset_history()  # Clear conversation history for fresh call
     
     session_id = f"sess_voice_{int(time.time()*1000)}"
     call_start_time = time.time()
@@ -322,11 +336,49 @@ async def audio_socket(websocket: WebSocket):
     await websocket.send_json({"type": "status", "message": "connected"})
     
     greeting = PROMPTS[BookingState.GREETING]
-    add_to_history("assistant", greeting)
+    add_to_history("assistant", greeting, history=booking_session.conversation_history)
     transcript_history.append(f"Assistant: {greeting}")
     await speak(websocket, session, greeting)
 
     last_check = time.time()
+
+    async def process_user_text(text: str):
+        transcript_history.append(f"User: {text}")
+        await websocket.send_json({"type": "transcript", "text": text, "final": True, "speaker": "user"})
+        await websocket.send_json({"type": "status", "message": "thinking"})
+
+        try:
+            in_res = await asyncio.wait_for(belfry_check_input(text), timeout=0.20)
+            if in_res.get("action") == "block":
+                refusal = "I apologize, but I cannot process that request. How else may I assist you?"
+                transcript_history.append(f"Assistant: {refusal}")
+                await speak(websocket, session, refusal)
+                return
+        except Exception:
+            pass
+
+        t0 = time.time()
+        if booking_session.state == BookingState.CONFIRM:
+            reply_text = handle_confirmation(booking_session, text)
+        else:
+            reply_text = handle_turn(booking_session, text)
+
+        if not reply_text or not str(reply_text).strip():
+            current_st = booking_session.state
+            reply_text = PROMPTS.get(current_st, "Could you please repeat that? What can I help you with today?")
+
+        llm_ms = int((time.time() - t0) * 1000)
+        print(f"[LLM Result ({llm_ms}ms)] '{reply_text}'")
+
+        try:
+            out_res = await asyncio.wait_for(belfry_check_output(reply_text), timeout=0.20)
+            if out_res.get("action") == "block":
+                reply_text = "I apologize, but I cannot share that information. Let's proceed with your appointment."
+        except Exception:
+            pass
+
+        transcript_history.append(f"Assistant: {reply_text}")
+        await speak(websocket, session, reply_text)
 
     try:
         while True:
@@ -342,15 +394,22 @@ async def audio_socket(websocket: WebSocket):
                         session.assistant_speaking = False
                         session.last_speech_or_prompt_time = time.time()
                         session.inactivity_check_count = 0
-                        session.reset_after_transcript()  # Clear any residual speaker leak
+                        # Keep the buffer if the caller already started talking over the tail.
+                        if not session.last_frame_had_speech:
+                            session.reset_after_transcript()
                         if not session.interrupted:
                             await websocket.send_json({"type": "status", "message": "listening"})
+                    elif data.get("type") == "user_text":
+                        typed = str(data.get("text") or "").strip()
+                        if typed:
+                            await process_user_text(typed)
                 except Exception as e:
                     print(f"WS Text Error: {e}")
 
             now = time.time()
             if now - last_check < 0.04:  # check more frequently for responsive barge-in
                 continue
+            elapsed_ms = min(int((now - last_check) * 1000), 200)
             last_check = now
 
             pcm = session.get_full_pcm()
@@ -362,7 +421,7 @@ async def audio_socket(websocket: WebSocket):
                 barge_threshold = max(session.speech_threshold * 1.8, 350.0)
                 speaking_detected = has_speech(pcm, window_ms=150, threshold=barge_threshold)
                 if speaking_detected:
-                    session.barge_in_speech_ms += 150
+                    session.barge_in_speech_ms += elapsed_ms
                     if session.barge_in_speech_ms >= BARGE_IN_CONFIRM_MS and not session.interrupted:
                         session.interrupted = True
                         session.assistant_speaking = False
@@ -395,7 +454,7 @@ async def audio_socket(websocket: WebSocket):
                 if session.user_speaking_start_time == 0:
                     session.user_speaking_start_time = now
             else:
-                session.silence_ms += 150
+                session.silence_ms += elapsed_ms
                 if session.silence_ms >= 500:
                     session.user_speaking_start_time = 0
 
@@ -421,7 +480,7 @@ async def audio_socket(websocket: WebSocket):
                 if session.inactivity_check_count == 0:
                     session.inactivity_check_count = 1
                     session.last_speech_or_prompt_time = now
-                    check_in = "Take your time! Whenever you're ready, let me know what day works best for you."
+                    check_in = "Take your time, I'm still here whenever you're ready."
                     transcript_history.append(f"Assistant: {check_in}")
                     await speak(websocket, session, check_in)
                     continue
@@ -457,15 +516,15 @@ async def audio_socket(websocket: WebSocket):
                     await websocket.send_json({"type": "status", "message": "listening"})
                     continue
 
+                final_pcm = prepare_utterance(final_pcm, session.noise_floor_rms)
+                if len(final_pcm) < 3200:
+                    await websocket.send_json({"type": "status", "message": "listening"})
+                    continue
+
                 text = ""
                 stt_backend = "none"
-
-                # Thresholds for Whisper's model-side confidence signals (verbose_json).
-                # Used as a SECOND gate after RMS: model-side confidence complements the
-                # energy-side RMS check — catches loud ambient noise the RMS gate can't distinguish.
-                # Both conditions must be true to reject (prevents false silencing of quiet speech).
-                NO_SPEECH_PROB_THRESHOLD = 0.80   # segment-level P(no speech) above this = model says silence
-                AVG_LOGPROB_THRESHOLD = -1.0       # log-probability below this = low confidence decode
+                recent_text = " ".join(transcript_history[-4:])
+                stt_language = pick_stt_language(recent_text)
 
                 global _groq_failure_count, _groq_circuit_open_until
 
@@ -477,25 +536,43 @@ async def audio_socket(websocket: WebSocket):
                             wf.setnchannels(1)
                             wf.setsampwidth(2)
                             wf.setframerate(16000)
-                            wf.writeframes(final_pcm.tobytes())  # use final_pcm — complete utterance
+                            wf.writeframes(final_pcm.tobytes())
                         wav_io.seek(0)
                         wav_io.name = "audio.wav"
 
-                        # Fast Groq Whisper Turbo transcription (~150ms latency)
-                        transcription = groq_client.audio.transcriptions.create(
-                            file=wav_io,
-                            model="whisper-large-v3-turbo",
-                            language="en",
-                            temperature=0,
-                            response_format="json",
-                            prompt="Healthcare voice conversation at Meridian Clinic.",
-                            timeout=GROQ_TIMEOUT_SECONDS,
-                        )
-                        text = transcription.text.strip()
-                        stt_backend = "groq"
+                        def _groq_transcribe():
+                            kwargs = {
+                                "file": wav_io,
+                                "model": STT_MODEL,
+                                "temperature": 0,
+                                "prompt": STT_PROMPT,
+                                "timeout": GROQ_TIMEOUT_SECONDS,
+                            }
+                            if stt_language:
+                                kwargs["language"] = stt_language
+                            try:
+                                wav_io.seek(0)
+                                return groq_client.audio.transcriptions.create(
+                                    response_format="verbose_json", **kwargs
+                                )
+                            except Exception:
+                                wav_io.seek(0)
+                                return groq_client.audio.transcriptions.create(
+                                    response_format="json", **kwargs
+                                )
 
-                        # Circuit closed: reset failure count on any success
-                        _groq_failure_count = 0
+                        transcription = await asyncio.to_thread(_groq_transcribe)
+                        no_speech_prob, avg_logprob = groq_segment_confidence(transcription)
+                        if is_low_confidence(no_speech_prob, avg_logprob):
+                            print(
+                                f"[STT] Low confidence drop (no_speech={no_speech_prob}, "
+                                f"avg_logprob={avg_logprob})"
+                            )
+                            text = ""
+                        else:
+                            text = (transcription.text or "").strip()
+                            stt_backend = "groq"
+                            _groq_failure_count = 0
 
                     except Exception as e:
                         _groq_failure_count += 1
@@ -520,25 +597,31 @@ async def audio_socket(websocket: WebSocket):
                     local_model = get_local_whisper_model()
                     if local_model:
                         print("[STT] Using local fallback model (Groq unavailable or circuit open)")
-                        pcm_float = final_pcm.astype(np.float32) / 32768.0  # use final_pcm
-                        segments, _ = local_model.transcribe(
-                            pcm_float,
-                            language="en",   # Pin language to English
-                            temperature=0,   # deterministic output — matches Groq config
-                            vad_filter=False,  # our RMS VAD already gated this segment — Silero re-trimming would clip word edges
-                            beam_size=5,
-                            initial_prompt=(
-                                "Healthcare voice conversation in English at Meridian Clinic. "
-                                "Appointment with doctor, general physician, doctor consultation, checkup, head surgery, surgery, brain surgery, "
-                                "cardiology, dermatology, orthopedic, pediatric, ophthalmology, dentist, "
-                                "tomorrow, Monday, Tuesday, Wednesday, morning, afternoon, evening, "
-                                "Abhilash, confirm, cancel, change."
-                            ),
+                        pcm_float = final_pcm.astype(np.float32) / 32768.0
+                        local_kwargs = {
+                            "temperature": 0,
+                            "vad_filter": False,
+                            "beam_size": 5,
+                            "condition_on_previous_text": False,
+                            "compression_ratio_threshold": 2.4,
+                            "no_speech_threshold": 0.6,
+                            "initial_prompt": STT_PROMPT,
+                        }
+                        if stt_language:
+                            local_kwargs["language"] = stt_language
+                        segments, info = await asyncio.to_thread(
+                            lambda: local_model.transcribe(pcm_float, **local_kwargs)
                         )
-                        text = " ".join(seg.text.strip() for seg in segments).strip()
-                        stt_backend = "local"
+                        segment_list = list(segments)
+                        text = " ".join(seg.text.strip() for seg in segment_list).strip()
+                        if segment_list:
+                            no_speech_prob = getattr(segment_list[0], "no_speech_prob", None)
+                            avg_logprob = getattr(segment_list[0], "avg_logprob", None)
+                            if is_low_confidence(no_speech_prob, avg_logprob):
+                                text = ""
+                        if text:
+                            stt_backend = "local"
 
-                        # Auto-close circuit: if local succeeds and circuit period has elapsed, reset
                         if time.time() >= _groq_circuit_open_until and _groq_failure_count >= GROQ_FAILURE_THRESHOLD:
                             _groq_failure_count = 0
                             print("[STT] Groq circuit breaker CLOSED — will retry Groq next turn")
@@ -552,10 +635,9 @@ async def audio_socket(websocket: WebSocket):
                 ]
                 HALLUCINATION_EXACT = {
                     "hmm", "hmm.", "uh.", "uh", "um.", "um",
-                    "thank you", "thank you.", "thanks", "thanks.",
-                    "thank you very much", "thank you very much.",
-                    "you", "you.", "bye", "bye.", "дякую", "дякую.",
+                    "you", "you.", "дякую", "дякую.",
                 }
+                text = cleanup_transcript(text)
                 t_lower = text.lower().strip()
                 # Check for Cyrillic/Russian/Ukrainian subtitle hallucinations (e.g. "Субтитрувальниця Оля Шор")
                 has_cyrillic = any('\u0400' <= char <= '\u04ff' for char in text)
@@ -577,45 +659,7 @@ async def audio_socket(websocket: WebSocket):
                 session.inactivity_check_count = 0
 
                 print(f"[STT:{stt_backend}] raw='{text}'")
-                transcript_history.append(f"User: {text}")
-                await websocket.send_json({"type": "transcript", "text": text, "final": True, "speaker": "user"})
-                await websocket.send_json({"type": "status", "message": "thinking"})
-
-                # Fast check user input (max 200ms timeout so conversation never stalls)
-                try:
-                    in_res = await asyncio.wait_for(belfry_check_input(text), timeout=0.20)
-                    if in_res.get("action") == "block":
-                        refusal = "I apologize, but I cannot process that request. How else may I assist you?"
-                        transcript_history.append(f"Assistant: {refusal}")
-                        await speak(websocket, session, refusal)
-                        continue
-                except Exception:
-                    pass
-
-                t0 = time.time()
-                if booking_session.state == BookingState.CONFIRM:
-                    reply_text = handle_confirmation(booking_session, text)
-                else:
-                    reply_text = handle_turn(booking_session, text)
-                
-                if not reply_text or not str(reply_text).strip():
-                    current_st = booking_session.state
-                    reply_text = PROMPTS.get(current_st, "Could you please repeat that? What can I help you with today?")
-
-                llm_ms = int((time.time() - t0) * 1000)
-                print(f"[LLM Result ({llm_ms}ms)] '{reply_text}'")
-
-                # Fast check LLM output (max 200ms timeout)
-                try:
-                    out_res = await asyncio.wait_for(belfry_check_output(reply_text), timeout=0.20)
-                    if out_res.get("action") == "block":
-                        reply_text = "I apologize, but I cannot share that information. Let's proceed with your appointment."
-                except Exception:
-                    pass
-
-                transcript_history.append(f"Assistant: {reply_text}")
-
-                await speak(websocket, session, reply_text)
+                await process_user_text(text)
 
     except (WebSocketDisconnect, RuntimeError):
         print("Client disconnected")
@@ -815,7 +859,6 @@ async def api_chat_reset(req: ChatResetRequest):
     """Resets the chatbot session to greeting state."""
     session_id = req.session_id.strip() if req.session_id else "default_chat_session"
     chat_sessions[session_id] = BookingSession()
-    reset_history()
     greeting = PROMPTS[BookingState.GREETING]
     return {
         "success": True,

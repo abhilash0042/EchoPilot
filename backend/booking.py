@@ -24,6 +24,7 @@ class BookingSlots:
 class BookingSession:
     state: BookingState = BookingState.GREETING
     slots: BookingSlots = field(default_factory=BookingSlots)
+    conversation_history: list = field(default_factory=list)
 
     def next_prompt_field(self) -> str:
         """What field are we currently trying to fill?"""
@@ -50,3 +51,10 @@ class BookingSession:
         idx = order.index(self.state)
         if idx < len(order) - 1:
             self.state = order[idx + 1]
+
+    def skip_filled(self):
+        """Jump past any slots already captured in this utterance."""
+        if self.state == BookingState.GREETING:
+            self.advance()
+        while self.next_prompt_field() and getattr(self.slots, self.next_prompt_field()):
+            self.advance()

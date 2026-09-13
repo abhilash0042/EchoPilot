@@ -1,6 +1,7 @@
 import edge_tts
 import tempfile
 import os
+import re
 import asyncio
 from typing import Optional
 
@@ -121,9 +122,19 @@ async def _synthesize_azure(text: str, voice: str) -> bytes:
         import azure.cognitiveservices.speech as speechsdk
         # Azure SDK is synchronous — run in executor to avoid blocking the event loop
         loop = asyncio.get_event_loop()
+        lang = "te-IN" if voice.startswith("te-") else "en-IN"
+        safe = (
+            text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+        ssml = (
+            f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{lang}">'
+            f'<voice name="{voice}"><prosody rate="-10%">{safe}</prosody></voice></speak>'
+        )
         result = await loop.run_in_executor(
             None,
-            lambda: synthesizer.speak_text_async(text).get()
+            lambda: synthesizer.speak_ssml_async(ssml).get()
         )
         if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
             return bytes(result.audio_data)
@@ -137,20 +148,28 @@ async def _synthesize_azure(text: str, voice: str) -> bytes:
 
 
 async def _synthesize_edge(text: str, voice: str) -> bytes:
-    """Synthesize using edge-tts (Tier 2 — no SLA, free)."""
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-        tmp_path = tmp.name
+    """Synthesize using edge-tts (Tier 2 — streamed, no temp file)."""
     try:
-        communicate = edge_tts.Communicate(text, voice, rate="+0%")
-        await communicate.save(tmp_path)
-        with open(tmp_path, "rb") as f:
-            return f.read()
+        communicate = edge_tts.Communicate(text, voice, rate="-10%", pitch="+2Hz")
+        chunks: list[bytes] = []
+        async for part in communicate.stream():
+            if part.get("type") == "audio" and part.get("data"):
+                chunks.append(part["data"])
+        if chunks:
+            return b"".join(chunks)
+        communicate = edge_tts.Communicate(text, voice, rate="-10%", pitch="+2Hz")
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            await communicate.save(tmp_path)
+            with open(tmp_path, "rb") as f:
+                return f.read()
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
     except Exception as e:
         print(f"[TTS:edge] Error with voice {voice}: {e}")
         return b""
-    finally:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
 
 
 async def _synthesize_piper(text: str) -> bytes:
@@ -176,13 +195,71 @@ async def _synthesize_piper(text: str) -> bytes:
         return b""
 
 
+_MONTHS = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
+
+
+def _ordinal(day: int) -> str:
+    if 10 <= day % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{day}{suffix}"
+
+
+def _speak_iso_date(match: re.Match) -> str:
+    year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return match.group(0)
+    return f"{_MONTHS[month - 1]} {_ordinal(day)}, {year}"
+
+
+def _speak_clock(match: re.Match) -> str:
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    if hour > 23 or minute > 59:
+        return match.group(0)
+    suffix = "AM"
+    spoken_hour = hour
+    if hour == 0:
+        spoken_hour = 12
+    elif hour == 12:
+        suffix = "PM"
+    elif hour > 12:
+        spoken_hour = hour - 12
+        suffix = "PM"
+    if minute == 0:
+        return f"{spoken_hour} {suffix}"
+    return f"{spoken_hour}:{minute:02d} {suffix}"
+
+
+def _speak_phone(match: re.Match) -> str:
+    return " ".join(match.group(0))
+
+
+def prepare_speech_text(text: str) -> str:
+    """Normalize copy so the neural voice uses natural sentence cadence."""
+    spoken = re.sub(r"[*_`#]+", "", str(text or ""))
+    spoken = re.sub(r"\s+", " ", spoken).strip()
+    spoken = re.sub(r"\b(20\d{2})-(\d{2})-(\d{2})\b", _speak_iso_date, spoken)
+    spoken = re.sub(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", _speak_clock, spoken)
+    spoken = re.sub(r"\b\d{10,12}\b", _speak_phone, spoken)
+    spoken = spoken.replace(" & ", " and ")
+    if spoken and spoken[-1] not in ".?!":
+        spoken += "."
+    return spoken
+
+
 async def synthesize(text: str) -> bytes:
     """Returns TTS audio bytes (MP3 or WAV) for the given text.
 
     Priority chain: phrase cache → Azure → edge-tts → Piper local.
     Returns empty bytes b"" only if all three tiers fail.
     """
-    if not text or not text.strip():
+    text = prepare_speech_text(text)
+    if not text:
         return b""
 
     voice = VOICE_TE if has_telugu(text) else VOICE_EN

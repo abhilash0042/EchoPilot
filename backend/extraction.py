@@ -1,6 +1,7 @@
 import os
+import re
 import json
-from datetime import date
+from datetime import date, timedelta
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -68,10 +69,197 @@ def validate_user_input(user_text: str) -> str:
         
     return sanitized
 
+
+def clean_spoken_text(text: str) -> str:
+    """Strip markdown / thinking tags so TTS reads naturally."""
+    if not text:
+        return ""
+    spoken = str(text).strip()
+    if "</think>" in spoken:
+        spoken = spoken.split("</think>")[-1].strip()
+    spoken = spoken.replace("```json", "").replace("```", "")
+    spoken = re.sub(r"[*_`#]+", "", spoken)
+    spoken = re.sub(r"\s+", " ", spoken).strip()
+    if (spoken.startswith('"') and spoken.endswith('"')) or (spoken.startswith("'") and spoken.endswith("'")):
+        spoken = spoken[1:-1].strip()
+    return spoken
+
+
+# Fast, offline extractors — used first so common spoken phrases do not wait on the LLM.
+_SERVICE_ALIASES = (
+    ("neurosurgery", ("neurosurgery", "brain surgery", "head surgery", "neuro")),
+    ("cardiology", ("cardiology", "cardiologist", "heart", "chest pain")),
+    ("dermatology", ("dermatology", "dermatologist", "skin", "rash", "acne")),
+    ("orthopedic", ("orthopedic", "orthopaedics", "ortho", "fracture", "joint pain", "bones")),
+    ("ophthalmology", ("ophthalmology", "ophthalmologist", "cataract", "vision", "eyes", "eye")),
+    ("pediatric", ("pediatric", "pediatrician", "paediatric", "child", "baby")),
+    ("dentist", ("dentist", "dental", "teeth", "tooth")),
+    ("general checkup", ("checkup", "check up", "check-up", "full body", "routine check", "health examination")),
+    ("surgery consultation", ("surgery", "operation", "surgical")),
+    ("general physician", ("general physician", "physician", "see a doctor", "appointment with doctor", "doctor appointment", "consultation", "see the doctor")),
+)
+
+_WORD_NUM = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+}
+
+
+def extract_service_fast(user_text: str) -> str | None:
+    lowered = user_text.lower()
+    for label, aliases in _SERVICE_ALIASES:
+        if any(alias in lowered for alias in aliases):
+            return label
+    return None
+
+
+def extract_date_fast(user_text: str, today: date | None = None) -> str | None:
+    today = today or date.today()
+    lowered = user_text.lower()
+
+    iso = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", user_text)
+    if iso:
+        return iso.group(1)
+
+    if re.search(r"\bday after tomorrow\b|\bparso\b|\bఎల్లుండి\b", lowered):
+        return (today + timedelta(days=2)).isoformat()
+    if re.search(r"\btomorrow\b|\bkal\b|\brépu\b|\bరేపు\b", lowered):
+        return (today + timedelta(days=1)).isoformat()
+    if re.search(r"\btoday\b|\bthis day\b", lowered):
+        return today.isoformat()
+
+    weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    next_day = re.search(r"\b(?:next|this)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", lowered)
+    bare_day = re.search(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", lowered)
+    match = next_day or bare_day
+    if match:
+        target = weekdays.index(match.group(1))
+        delta = (target - today.weekday()) % 7
+        if delta == 0:
+            delta = 7 if (next_day or "next" in lowered) else 0
+        return (today + timedelta(days=delta)).isoformat()
+    return None
+
+
+def extract_time_fast(user_text: str) -> str | None:
+    lowered = user_text.lower()
+
+    half = re.search(r"\bhalf past\s+(\d{1,2})\b", lowered)
+    if half:
+        hour = int(half.group(1)) % 12
+        if re.search(r"\bp\.?m\.?\b", lowered) or hour < 8:
+            hour = hour + 12 if hour < 12 else hour
+        if re.search(r"\ba\.?m\.?\b", lowered) and hour == 12:
+            hour = 0
+        return f"{hour:02d}:30"
+
+    at_clock = re.search(r"\bat\s+(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?\b", lowered)
+    if at_clock:
+        hour = int(at_clock.group(1))
+        minute = int(at_clock.group(2) or 0)
+        if hour <= 23 and minute <= 59:
+            meridiem = (at_clock.group(3) or "").replace(".", "")
+            if meridiem.startswith("p") and hour < 12:
+                hour += 12
+            elif meridiem.startswith("a") and hour == 12:
+                hour = 0
+            elif not meridiem and 1 <= hour <= 7:
+                hour += 12
+            return f"{hour:02d}:{minute:02d}"
+
+    clock = re.search(
+        r"\b(\d{1,2})(?::(\d{2}))?\s*(o'?clock)?\s*(a\.?m\.?|p\.?m\.?)?\b",
+        lowered,
+    )
+    if clock and (clock.group(3) or clock.group(4) or clock.group(2)):
+        hour = int(clock.group(1))
+        minute = int(clock.group(2) or 0)
+        if hour > 23 or minute > 59:
+            return None
+        meridiem = (clock.group(4) or "").replace(".", "")
+        if meridiem.startswith("p") and hour < 12:
+            hour += 12
+        if meridiem.startswith("a") and hour == 12:
+            hour = 0
+        if not meridiem and not clock.group(3) and hour <= 7:
+            hour += 12
+        return f"{hour:02d}:{minute:02d}"
+
+    if re.search(r"\bmorning\b|\bఉదయం\b", lowered):
+        return "10:00"
+    if re.search(r"\bafternoon\b|\bమధ్యాహ్నం\b", lowered):
+        return "14:00"
+    if re.search(r"\bevening\b|\bసాయంత్రం\b", lowered):
+        return "18:00"
+    return None
+
+
+def extract_phone_fast(user_text: str) -> str | None:
+    formatted = re.findall(r"(?:\+?\d{1,2}[-.\s]*)?(?:\(?\d{3}\)?[-.\s]*\d{3}[-.\s]*\d{4})", user_text)
+    if formatted:
+        digits = re.sub(r"\D", "", formatted[0])
+        if 10 <= len(digits) <= 15:
+            return digits[-10:] if len(digits) > 10 and digits.startswith(("1", "91")) else digits
+
+    words = re.findall(r"[a-z]+", user_text.lower())
+    spoken_digits = "".join(_WORD_NUM[w] for w in words if w in _WORD_NUM)
+    if 10 <= len(spoken_digits) <= 15:
+        return spoken_digits[-10:] if len(spoken_digits) > 10 else spoken_digits
+    return None
+
+
+_NAME_STOP = {
+    "looking", "calling", "trying", "here", "just", "going", "booking",
+    "fine", "good", "okay", "ok", "ready", "done", "there",
+    "yes", "yeah", "yep", "no", "nope", "hello", "hi", "hey",
+    "thanks", "thank", "please", "sorry", "sure", "help",
+}
+
+
+def extract_name_fast(user_text: str) -> str | None:
+    match = re.search(
+        r"\b(?:my name is|this is|i am|i'm)\s+([A-Za-z][A-Za-z.'-]{1,40}(?:\s+[A-Za-z][A-Za-z.'-]{1,40}){0,2})\b",
+        user_text,
+        re.IGNORECASE,
+    )
+    if not match:
+        match = re.search(r"\bfor\s+([A-Z][a-zA-Z.'-]+(?:\s+[A-Z][a-zA-Z.'-]+){0,2})\b", user_text)
+    if match:
+        name = match.group(1).strip()
+        first = name.split()[0].lower()
+        if first not in _NAME_STOP and first not in {"cardiology", "dermatology", "tomorrow"}:
+            return name.title()
+
+    bare = user_text.strip().rstrip(".!,")
+    if re.fullmatch(r"[A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z][A-Za-z.'-]*){0,2}", bare):
+        if bare.lower() not in _NAME_STOP and extract_service_fast(bare) is None:
+            if not extract_date_fast(bare) and not extract_time_fast(bare):
+                return bare.title()
+    return None
+
+
+def _fast_extract(field_name: str, user_text: str) -> str | None:
+    if field_name == "service":
+        return extract_service_fast(user_text)
+    if field_name == "date":
+        return extract_date_fast(user_text)
+    if field_name == "time":
+        return extract_time_fast(user_text)
+    if field_name == "name":
+        return extract_name_fast(user_text)
+    if field_name == "phone":
+        return extract_phone_fast(user_text)
+    return None
+
+
 def extract_field(field_name: str, user_text: str) -> str | None:
     user_text = validate_user_input(user_text)
     if not user_text:
         return None
+
+    fast = _fast_extract(field_name, user_text)
+    if fast:
+        return fast
 
     instruction = FIELD_PROMPTS.get(field_name, "")
     if field_name == "date":
@@ -92,16 +280,63 @@ No other text, no markdown formatting."""
             temperature=0,
             response_format={"type": "json_object"}
         )
-        raw = result.choices[0].message.content.strip()
-        # Strip Qwen3 reasoning/thinking tags before parsing JSON
-        if "</think>" in raw:
-            raw = raw.split("</think>")[-1].strip()
+        raw = clean_spoken_text(result.choices[0].message.content)
         raw = raw.replace("```json", "").replace("```", "").strip()
         parsed = json.loads(raw)
         return parsed.get("value")
     except Exception as e:
         print(f"Extraction error: {e}")
         return None
+
+
+def extract_slots(user_text: str, fields: list[str] | None = None) -> dict[str, str]:
+    """Pull every booking slot present in one utterance."""
+    user_text = validate_user_input(user_text)
+    wanted = fields or ["service", "date", "time", "name", "phone"]
+    found: dict[str, str] = {}
+    if not user_text:
+        return found
+
+    for field in wanted:
+        value = _fast_extract(field, user_text)
+        if value:
+            found[field] = value
+
+    missing = [field for field in wanted if field not in found]
+    if not missing:
+        return found
+
+    try:
+        today = date.today().isoformat()
+        system = (
+            f"Today is {today}. Extract booking details from the caller. "
+            f"Return ONLY JSON with these keys: {', '.join(missing)}. "
+            'Use ISO date YYYY-MM-DD, 24-hour time HH:MM, digits-only phone. '
+            "Missing values must be null. No markdown."
+        )
+        result = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_text},
+            ],
+            max_tokens=160,
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+        raw = clean_spoken_text(result.choices[0].message.content)
+        parsed = json.loads(raw.replace("```json", "").replace("```", "").strip())
+        for field in missing:
+            value = parsed.get(field)
+            if value:
+                found[field] = str(value).strip()
+    except Exception as e:
+        print(f"Multi-slot extraction error: {e}")
+        for field in missing:
+            value = extract_field(field, user_text)
+            if value:
+                found[field] = value
+    return found
 
 # Shared persona that makes the AI sound like a warm, bilingual receptionist
 PERSONA = """You are Elena, a warm, friendly receptionist at Meridian Health clinic.
@@ -127,17 +362,26 @@ Conversational Style Rules:
 # Conversation history for multi-turn context
 _conversation_history: list[dict] = []
 
-def add_to_history(role: str, content: str):
+def add_to_history(role: str, content: str, history: list[dict] | None = None):
     """Track conversation so the LLM has context of what was already said."""
-    _conversation_history.append({"role": role, "content": content})
-    if len(_conversation_history) > 20:
-        _conversation_history.pop(0)
-        _conversation_history.pop(0)
+    target = history if history is not None else _conversation_history
+    target.append({"role": role, "content": content})
+    if len(target) > 20:
+        target.pop(0)
+        target.pop(0)
 
-def reset_history():
-    _conversation_history.clear()
+def reset_history(history: list[dict] | None = None):
+    if history is None:
+        _conversation_history.clear()
+    else:
+        history.clear()
 
-def get_conversational_reply(user_text: str, current_prompt: str, allow_freeform: bool = False) -> str:
+def get_conversational_reply(
+    user_text: str,
+    current_prompt: str,
+    allow_freeform: bool = False,
+    history: list[dict] | None = None,
+) -> str:
     user_text = validate_user_input(user_text)
     if not user_text:
         return current_prompt
@@ -155,8 +399,9 @@ Important:
 - First, respond naturally and briefly to what they said in their language (Telugu or English).
 - Then smoothly bring the conversation back to your question: "{current_prompt}"."""
 
+    prior = history if history is not None else _conversation_history
     messages = [{"role": "system", "content": system}]
-    messages.extend(_conversation_history[-10:])
+    messages.extend(prior[-10:])
     messages.append({"role": "user", "content": user_text})
 
     try:
@@ -166,20 +411,35 @@ Important:
             max_tokens=150,
             temperature=0.8,
         )
-        reply = result.choices[0].message.content.strip()
-        if "</think>" in reply:
-            reply = reply.split("</think>")[-1].strip()
-        if reply.startswith('"') and reply.endswith('"'):
-            reply = reply[1:-1]
-        return reply
+        return clean_spoken_text(result.choices[0].message.content) or current_prompt
     except Exception as e:
         print(f"Conversation error: {e}")
         return current_prompt
+
+
+_YES = {
+    "yes", "yeah", "yep", "yup", "sure", "ok", "okay", "alright", "all right",
+    "sounds good", "perfect", "that's right", "thats right", "correct",
+    "book it", "confirm", "go ahead", "haan", "ha", "avunu", "sare", "oke",
+    "అవును", "హా", "సరే", "ఒకే", "అవునండి", "బుక్ చేయండి",
+}
+_NO = {
+    "no", "nope", "nah", "wrong", "cancel", "change", "start over", "wait",
+    "incorrect", "not right", "vaddu", "kaadu",
+    "వద్దు", "కాదు", "మార్చండి", "తప్పు",
+}
+
 
 def extract_confirmation(user_text: str) -> str | None:
     user_text = validate_user_input(user_text)
     if not user_text:
         return None
+
+    cleaned = user_text.strip().lower().rstrip(".!?,")
+    if cleaned in _YES or cleaned.startswith("yes"):
+        return "yes"
+    if cleaned in _NO or cleaned.startswith("no"):
+        return "no"
 
     system = """A clinic receptionist just read out an appointment summary and asked the caller to confirm.
 Based on the caller's response in English or Telugu, determine if they mean YES (confirm) or NO (reject/change).
@@ -199,14 +459,14 @@ Respond with ONLY a JSON object: {"value": "yes"} or {"value": "no"} or {"value"
             ],
             max_tokens=20,
             temperature=0,
+            response_format={"type": "json_object"},
         )
-        raw = result.choices[0].message.content.strip()
-        # Strip Qwen3 thinking tags before parsing JSON
-        if "</think>" in raw:
-            raw = raw.split("</think>")[-1].strip()
-        raw = raw.replace("```json", "").replace("```", "").strip()
-        parsed = json.loads(raw)
-        return parsed.get("value")
-    except:
+        raw = clean_spoken_text(result.choices[0].message.content)
+        parsed = json.loads(raw.replace("```json", "").replace("```", "").strip())
+        value = parsed.get("value")
+        if value in ("yes", "no"):
+            return value
+        return None
+    except Exception:
         return None
 

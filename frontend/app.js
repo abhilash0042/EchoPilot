@@ -69,9 +69,9 @@ async function startCall() {
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const urlParams = new URLSearchParams(window.location.search);
         const explicitPort = urlParams.get('backend') || urlParams.get('port');
-        let wsHost = explicitPort ? `127.0.0.1:${explicitPort}` : (window.location.host || '127.0.0.1:8005');
+        let wsHost = explicitPort ? `127.0.0.1:${explicitPort}` : (window.location.host || '127.0.0.1:8000');
         if (wsHost.includes(':3000') || wsHost.includes(':3001') || wsHost.includes(':5500') || wsHost.includes(':5173')) {
-            wsHost = wsHost.replace(/:\d+$/, ':8005');
+            wsHost = wsHost.replace(/:\d+$/, ':8000');
         }
         ws = new WebSocket(`${wsProtocol}//${wsHost}/ws/audio`);
         
@@ -237,10 +237,24 @@ async function startStreaming(stream) {
 
 let currentAudio = null;  // Track currently playing HTMLAudioElement (enables browser AEC reference)
 
+function signalPlaybackEnded() {
+    if (isConnected && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({type: "playback_ended"}));
+    }
+}
+
+function detectAudioMime(buffer) {
+    const bytes = new Uint8Array(buffer.slice(0, 12));
+    const isWav = bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46;
+    return isWav ? "audio/wav" : "audio/mpeg";
+}
+
 async function playReceivedAudio(blob) {
     try {
-        if (!blob || (blob.size && blob.size < 200)) {
+        const raw = blob instanceof ArrayBuffer ? blob : await blob.arrayBuffer();
+        if (!raw || raw.byteLength < 200) {
             console.warn("[playReceivedAudio] Empty or truncated audio blob, skipping");
+            signalPlaybackEnded();
             return;
         }
         // Stop any currently playing audio to prevent overlapping voices
@@ -256,9 +270,8 @@ async function playReceivedAudio(blob) {
             currentAudio = null;
         }
 
-        // Create an object URL from the audio blob with explicit audio/mpeg MIME type
         // Routing through HTMLAudioElement allows Chromium/WebKit WebRTC AEC to hook into the playback stream
-        const audioBlob = (blob instanceof Blob && blob.type) ? blob : new Blob([blob], { type: 'audio/mpeg' });
+        const audioBlob = new Blob([raw], { type: detectAudioMime(raw) });
         const audioUrl = URL.createObjectURL(audioBlob);
         const audio = new Audio(audioUrl);
         currentAudio = audio;
@@ -274,9 +287,7 @@ async function playReceivedAudio(blob) {
             if (podElena) podElena.classList.remove('elena-speaking');
             if (elenaStatusText) elenaStatusText.textContent = "Listening...";
             if (userStatusText) userStatusText.textContent = "Mic Active";
-            if (isConnected && ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({type: "playback_ended"}));
-            }
+            signalPlaybackEnded();
         };
 
         audio.onerror = (err) => {
@@ -288,6 +299,7 @@ async function playReceivedAudio(blob) {
             assistantSpeaking = false;
             visualizerEl.classList.remove('speaking');
             callInterface.classList.remove('speaking-state');
+            signalPlaybackEnded();
         };
 
         assistantSpeaking = true;
@@ -308,6 +320,7 @@ async function playReceivedAudio(blob) {
         assistantSpeaking = false;
         visualizerEl.classList.remove('speaking');
         callInterface.classList.remove('speaking-state');
+        signalPlaybackEnded();
     }
 }
 
@@ -1161,9 +1174,8 @@ document.querySelectorAll('.quick-chip, .spec-book-btn').forEach(btn => {
         if (!prompt) return;
         
         if (isConnected && ws && ws.readyState === WebSocket.OPEN) {
-            // Already in voice call: show user statement in transcript
-            appendTranscriptLine("user", prompt);
-            statusText.textContent = "⚡ Inquired with Elena...";
+            ws.send(JSON.stringify({ type: "user_text", text: prompt }));
+            statusText.textContent = "Talking to Elena...";
         } else {
             // Switch to chat mode or start call
             if (modeChatBtn && chatInput && chatForm) {
@@ -1183,7 +1195,7 @@ document.querySelectorAll('.incall-chip').forEach(btn => {
         const speakText = btn.getAttribute('data-speak');
         if (!speakText) return;
         if (isConnected && ws && ws.readyState === WebSocket.OPEN) {
-            appendTranscriptLine("user", speakText);
+            ws.send(JSON.stringify({ type: "user_text", text: speakText }));
         }
     });
 });
