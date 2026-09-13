@@ -7,8 +7,11 @@ import json
 import wave
 from typing import Optional, List, Dict
 from pydantic import BaseModel
+from pathlib import Path
 from dotenv import load_dotenv
 
+_env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=_env_path)
 load_dotenv()
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -49,6 +52,14 @@ app = FastAPI(
     version="2.0.0"
 )
 
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+@app.get("/api/telemetry")
+async def telemetry_check():
+    return {"status": "ok"}
+
 # Auto-initialize database and sample data on startup
 @app.on_event("startup")
 async def on_startup():
@@ -88,6 +99,7 @@ if _allowed_origins_env:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
@@ -176,8 +188,10 @@ class AudioSession:
         self.pcm_buffer.extend(chunk)
         # Cap buffer at ~15 seconds (16000 rate * 2 bytes/sample * 15s = 480000 bytes)
         if len(self.pcm_buffer) > 480000:
-            print("[AudioSession] WARNING: 15s buffer cap hit — dropping head of utterance. "
-                  "User may be speaking very long sentences.")
+            if not getattr(self, "_buffer_cap_warned", False):
+                print("[AudioSession] WARNING: 15s buffer cap hit — dropping head of utterance. "
+                      "User may be speaking very long sentences.")
+                self._buffer_cap_warned = True
             self.pcm_buffer = self.pcm_buffer[-480000:]
 
         # Calibration: accumulate the first ~500ms of audio (16000 Hz * 0.5s * 2 bytes = 16000 bytes)
@@ -204,6 +218,7 @@ class AudioSession:
 
     def reset_after_transcript(self):
         self.pcm_buffer = bytearray()
+        self._buffer_cap_warned = False
 
     def reset_for_interrupt(self, confirmed_speech_ms: int):
         """On barge-in interrupt, preserve the user's confirmed speech tail.

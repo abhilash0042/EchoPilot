@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; media-src 'self' blob: data:; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; font-src 'self' https://fonts.gstatic.com https://unpkg.com; connect-src 'self' ws: wss: http: https:; img-src 'self' data: https:;">
-    <title>Meridian Health | AI Appointment Booking</title>
+    <title>Meridian Health | Medical Concierge & Care Coordinator</title>
     <!-- Google Fonts for modern typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- Phosphor Icons for elegant UI icons -->
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <link rel="stylesheet" href="styles.css">
@@ -17,14 +17,30 @@
     <div class="background-elements">
         <div class="blob blob-1"></div>
         <div class="blob blob-2"></div>
+        <div class="ambient-glow"></div>
     </div>
 
     <div class="container">
         <!-- Header -->
         <header class="glass-panel header">
             <div class="logo">
-                <i class="ph-fill ph-heartbeat"></i>
-                <span>Meridian Health</span>
+                <div class="logo-icon-wrap">
+                    <i class="ph-fill ph-heartbeat"></i>
+                </div>
+                <div class="logo-text-group">
+                    <span class="logo-title">Meridian Health</span>
+                    <span class="logo-subtitle">Medical Concierge Desk</span>
+                </div>
+            </div>
+            <div class="header-badges">
+                <div class="clinic-status-pill">
+                    <span class="pulse-dot"></span>
+                    <span>Clinics Open • Paldi & Navrangpura</span>
+                </div>
+                <div class="helpline-pill">
+                    <i class="ph-fill ph-phone"></i>
+                    <span>Desk: (800) 555-MERIDIAN</span>
+                </div>
             </div>
             <nav class="nav-links">
                 <button id="open-db-btn" class="nav-db-btn">
@@ -38,9 +54,46 @@
         <main class="main-content">
             <div class="hero-section text-center">
                 <div class="hero-text-container">
-                    <span class="badge">Next-Gen Patient Care</span>
-                    <h1 class="hero-title">Schedule your appointment with our <span class="text-gradient">AI Assistant</span></h1>
-                    <p class="hero-subtitle">Experience instant, hassle-free booking. Just click call and speak naturally to our intelligent scheduling agent.</p>
+                    <div class="hero-tag-row">
+                        <span class="badge badge-hospital">
+                            <i class="ph-fill ph-first-aid"></i> Meridian Medical Concierge
+                        </span>
+                        <span class="badge badge-hipaa">
+                            <i class="ph-fill ph-shield-check"></i> HIPAA & PHI Protected
+                        </span>
+                    </div>
+                    <h1 class="hero-title">
+                        Compassionate Care Scheduling, <br/>
+                        <span class="text-gradient">Natural as a Conversation</span>
+                    </h1>
+                    <p class="hero-subtitle">
+                        Meet <strong>Elena Vance</strong>, Senior Care Coordinator at Meridian Health. Schedule specialist visits, review doctor fees, and confirm appointments with zero wait times.
+                    </p>
+                </div>
+
+                <!-- Trust Highlights Bar -->
+                <div class="trust-grid">
+                    <div class="trust-card">
+                        <div class="trust-icon"><i class="ph-duotone ph-stethoscope"></i></div>
+                        <div class="trust-content">
+                            <h4>6 Board-Certified MDs</h4>
+                            <p>Cardiology, Derm, Ortho, Pediatrics</p>
+                        </div>
+                    </div>
+                    <div class="trust-card">
+                        <div class="trust-icon"><i class="ph-duotone ph-clock-countdown"></i></div>
+                        <div class="trust-content">
+                            <h4>Instant Slotting</h4>
+                            <p>Live calendar booking in &lt;60s</p>
+                        </div>
+                    </div>
+                    <div class="trust-card">
+                        <div class="trust-icon"><i class="ph-duotone ph-lock-key"></i></div>
+                        <div class="trust-content">
+                            <h4>Confidential & Secure</h4>
+                            <p>Encrypted patient records & MRN</p>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- Mode Switcher: Voice vs Text Chatbot -->
@@ -48,11 +101,11 @@
                     <div class="mode-toggle">
                         <button id="mode-voice-btn" class="mode-btn active">
                             <i class="ph-fill ph-microphone"></i>
-                            <span>Voice Assistant</span>
+                            <span>Voice Consultation</span>
                         </button>
                         <button id="mode-chat-btn" class="mode-btn">
                             <i class="ph-fill ph-chat-teardrop-text"></i>
-                            <span>Interactive Chatbot</span>
+                            <span>Concierge Messaging</span>
                         </button>
                     </div>
                 </div>
@@ -60,48 +113,173 @@
                 <!-- 1. Voice Mode Action Area -->
                 <div id="voice-mode-section">
                     <div class="call-action-area">
-                        <button id="call-btn" class="call-btn pulse-anim">
-                            <i class="ph-fill ph-phone-call"></i>
-                            <span id="call-btn-text">Call AI Assistant</span>
-                        </button>
-                        <p class="status-text" id="status-text">Ready to connect.</p>
-                    </div>
-
-                    <!-- Call Interface (Hidden by default) -->
-                    <div id="call-interface" class="glass-panel call-interface hidden">
-                        <div class="call-header">
-                            <div class="agent-profile">
-                                <div class="avatar-ring">
-                                    <div class="avatar">
-                                        <i class="ph ph-robot"></i>
+                        <div class="call-cta-row">
+                            <button id="call-btn" class="call-btn pulse-anim">
+                                <div class="call-btn-glow"></div>
+                                <i class="ph-fill ph-phone-call"></i>
+                                <div class="call-btn-text-group">
+                                    <span id="call-btn-text" class="call-btn-main">Speak with Elena Vance</span>
+                                    <span class="call-btn-sub">Click to connect live audio</span>
+                                </div>
+                            </button>
+                            
+                            <!-- Interactive Pre-call Mic Check -->
+                            <button id="mic-test-btn" class="mic-test-btn" title="Test your microphone volume before calling" type="button">
+                                <i class="ph-fill ph-microphone"></i>
+                                <div class="mic-test-info">
+                                    <span id="mic-test-label">Test Mic</span>
+                                    <div class="mic-level-meter" id="mic-level-meter">
+                                        <span class="m-bar"></span>
+                                        <span class="m-bar"></span>
+                                        <span class="m-bar"></span>
+                                        <span class="m-bar"></span>
+                                        <span class="m-bar"></span>
                                     </div>
                                 </div>
-                                <div class="agent-info">
-                                    <h3>Elena Assistant</h3>
-                                    <div class="status-row">
-                                        <span class="live-status"><span class="dot"></span> Connected</span>
-                                        <span class="timer-dot">•</span>
-                                        <span id="call-timer" class="call-timer">00:00</span>
+                            </button>
+                        </div>
+                        
+                        <p class="status-text" id="status-text">Ready to connect with Elena Vance.</p>
+
+                        <!-- Quick Conversation Prompts -->
+                        <div class="quick-prompts-tray">
+                            <span class="prompts-label">Popular Inquiries:</span>
+                            <div class="quick-prompt-chips">
+                                <button type="button" class="quick-chip" data-prompt="I would like to book a cardiology consultation with Dr. Sarah Lin">
+                                    <i class="ph-bold ph-heart"></i> Dr. Lin (Cardiology)
+                                </button>
+                                <button type="button" class="quick-chip" data-prompt="Book a general health checkup for tomorrow morning at 10 AM">
+                                    <i class="ph-bold ph-calendar-plus"></i> General Checkup Tomorrow 10 AM
+                                </button>
+                                <button type="button" class="quick-chip" data-prompt="I need a skin examination appointment with Dr. Priya Sharma">
+                                    <i class="ph-bold ph-sparkle"></i> Dr. Sharma (Dermatology)
+                                </button>
+                                <button type="button" class="quick-chip" data-prompt="What are the consultation fees for orthopedic surgery?">
+                                    <i class="ph-bold ph-currency-dollar"></i> Check Doctor Fees
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dual-Sided Call Interface (Shown while on call) -->
+                    <div id="call-interface" class="glass-panel call-interface hidden">
+                        <!-- Dual Speaker Stage (Elena Left vs Patient Right) -->
+                        <div class="dual-speaker-stage">
+                            <!-- Left Stage: Elena Vance -->
+                            <div class="speaker-pod speaker-elena" id="pod-elena">
+                                <div class="pod-avatar-wrap">
+                                    <div class="avatar-ring elena-ring">
+                                        <div class="avatar elena-avatar">
+                                            <i class="ph-fill ph-user-circle"></i>
+                                        </div>
+                                    </div>
+                                    <span class="pod-badge-icon"><i class="ph-fill ph-stethoscope"></i></span>
+                                </div>
+                                <div class="pod-details">
+                                    <div class="pod-name-row">
+                                        <h4>Elena Vance</h4>
+                                        <span class="verified-check" title="Verified Care Coordinator"><i class="ph-fill ph-check-circle"></i></span>
+                                    </div>
+                                    <p class="pod-role">Senior Care Coordinator</p>
+                                    <div class="speaker-state-pill" id="elena-status-pill">
+                                        <span class="pill-dot"></span>
+                                        <span id="elena-status-text">Connected</span>
+                                    </div>
+                                    <!-- Dynamic Equalizer Bars for Elena -->
+                                    <div class="audio-equalizer elena-equalizer" id="elena-bars">
+                                        <span class="eq-bar"></span>
+                                        <span class="eq-bar"></span>
+                                        <span class="eq-bar"></span>
+                                        <span class="eq-bar"></span>
+                                        <span class="eq-bar"></span>
                                     </div>
                                 </div>
                             </div>
-                            <button id="end-call-btn" class="end-call-btn">
-                                <i class="ph-fill ph-phone-slash"></i>
-                            </button>
+
+                            <!-- Center Hub: Call Telemetry & End Call -->
+                            <div class="call-hub">
+                                <div class="hub-timer-badge">
+                                    <span class="live-dot"></span>
+                                    <span id="call-timer" class="call-timer">00:00</span>
+                                </div>
+                                
+                                <div class="central-wave-bridge">
+                                    <div class="bridge-line"></div>
+                                    <span class="bridge-tag">DUPLEX AUDIO LINK</span>
+                                    <div class="bridge-line"></div>
+                                </div>
+
+                                <button id="end-call-btn" class="end-call-btn" title="End Consultation">
+                                    <i class="ph-fill ph-phone-slash"></i>
+                                    <span>End Call</span>
+                                </button>
+                                
+                                <div class="barge-in-tip">
+                                    <i class="ph-fill ph-sparkle"></i>
+                                    <span>Natural conversation: speak anytime to interrupt Elena</span>
+                                </div>
+                            </div>
+
+                            <!-- Right Stage: You / Patient -->
+                            <div class="speaker-pod speaker-user" id="pod-user">
+                                <div class="pod-details user-details">
+                                    <div class="pod-name-row user-name-row">
+                                        <h4>You</h4>
+                                        <span class="caller-chip">Caller</span>
+                                    </div>
+                                    <p class="pod-role">Patient Desk / Mic Audio</p>
+                                    <div class="speaker-state-pill user-pill" id="user-status-pill">
+                                        <span class="pill-dot"></span>
+                                        <span id="user-status-text">Mic Active</span>
+                                    </div>
+                                    <!-- Dynamic Real-time Equalizer Bars for User's Voice -->
+                                    <div class="audio-equalizer user-equalizer" id="user-bars">
+                                        <span class="eq-bar"></span>
+                                        <span class="eq-bar"></span>
+                                        <span class="eq-bar"></span>
+                                        <span class="eq-bar"></span>
+                                        <span class="eq-bar"></span>
+                                    </div>
+                                </div>
+                                <div class="pod-avatar-wrap">
+                                    <div class="avatar-ring user-ring">
+                                        <div class="avatar user-avatar">
+                                            <i class="ph-fill ph-user"></i>
+                                        </div>
+                                    </div>
+                                    <span class="pod-badge-icon mic-badge"><i class="ph-fill ph-microphone"></i></span>
+                                </div>
+                            </div>
                         </div>
 
-                        <div class="visualizer">
-                            <div class="bar"></div>
-                            <div class="bar"></div>
-                            <div class="bar"></div>
-                            <div class="bar"></div>
-                            <div class="bar"></div>
-                            <div class="bar"></div>
-                            <div class="bar"></div>
+                        <!-- In-Call Interactive Quick Suggestions -->
+                        <div class="in-call-suggestions">
+                            <span class="in-call-label">Quick Responses:</span>
+                            <div class="in-call-chips-group">
+                                <button type="button" class="incall-chip" data-speak="Tomorrow at 10 AM works great for me.">
+                                    "Tomorrow at 10 AM"
+                                </button>
+                                <button type="button" class="incall-chip" data-speak="What is the doctor's consultation fee?">
+                                    "What is the fee?"
+                                </button>
+                                <button type="button" class="incall-chip" data-speak="Yes, please go ahead and confirm my booking.">
+                                    "Yes, please confirm"
+                                </button>
+                                <button type="button" class="incall-chip" data-speak="Could you check other available times?">
+                                    "Check other times"
+                                </button>
+                            </div>
                         </div>
 
-                        <div class="transcript-area" id="transcript-area">
-                            <!-- Chat bubbles will be injected here by JS -->
+                        <!-- Transcript Area (Left-side Elena bubbles, Right-side User bubbles) -->
+                        <div class="transcript-wrapper">
+                            <div class="transcript-header">
+                                <span><i class="ph-duotone ph-chat-centered-text"></i> Live Consultation Dialogue</span>
+                                <span class="transcript-tag">Dual-Channel Sync</span>
+                            </div>
+                            <div class="transcript-area" id="transcript-area">
+                                <!-- Chat bubbles dynamically injected by JS: Elena on Left, You on Right -->
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -111,20 +289,23 @@
                     <div class="glass-panel chat-interface">
                         <div class="chat-header">
                             <div class="agent-profile">
-                                <div class="avatar-ring">
-                                    <div class="avatar">
-                                        <i class="ph ph-robot"></i>
+                                <div class="avatar-ring elena-ring">
+                                    <div class="avatar elena-avatar">
+                                        <i class="ph-fill ph-user-circle"></i>
                                     </div>
                                 </div>
                                 <div class="agent-info">
-                                    <h3>Meridian Health Chatbot</h3>
+                                    <div class="pod-name-row">
+                                        <h3>Elena Vance</h3>
+                                        <span class="verified-check"><i class="ph-fill ph-check-circle"></i></span>
+                                    </div>
                                     <div class="status-row">
-                                        <span class="live-status"><span class="dot"></span> Online & Ready</span>
+                                        <span class="live-status"><span class="dot"></span> Senior Care Concierge • Online</span>
                                     </div>
                                 </div>
                             </div>
                             <button id="reset-chat-btn" class="btn-secondary" title="Start fresh conversation">
-                                <i class="ph-bold ph-arrow-clockwise"></i> New Chat
+                                <i class="ph-bold ph-arrow-clockwise"></i> New Conversation
                             </button>
                         </div>
 
@@ -140,11 +321,132 @@
 
                         <!-- Chat Input Form -->
                         <form class="chat-input-area" id="chat-form">
-                            <input type="text" id="chat-input" placeholder="Type a message (e.g., 'Book a checkup tomorrow at 10 AM')..." autocomplete="off" />
+                            <input type="text" id="chat-input" placeholder="Type a message (e.g., 'Book Dr. Sarah Lin tomorrow at 10 AM')..." autocomplete="off" />
                             <button type="submit" id="chat-send-btn" class="chat-send-btn" aria-label="Send message">
                                 <i class="ph-bold ph-paper-plane-right"></i>
                             </button>
                         </form>
+                    </div>
+                </div>
+
+                <!-- On-Duty Specialists Showcase (Making the UI interesting, human, not pure AI) -->
+                <div class="specialists-section">
+                    <div class="section-header-row">
+                        <div>
+                            <span class="badge badge-subtle">Meridian Physicians Network</span>
+                            <h2 class="section-title">Today's On-Duty Specialists</h2>
+                        </div>
+                        <span class="specialist-count-pill"><i class="ph-fill ph-check-circle"></i> 6 Doctors Ready</span>
+                    </div>
+
+                    <div class="specialists-grid" id="specialists-grid">
+                        <div class="specialist-card" data-doctor="Dr. Sarah Lin" data-dept="Cardiology">
+                            <div class="specialist-top">
+                                <div class="specialist-avatar card-ava-blue">
+                                    <i class="ph-duotone ph-heartbeat"></i>
+                                </div>
+                                <span class="spec-dept-pill">Cardiology</span>
+                            </div>
+                            <h3 class="specialist-name">Dr. Sarah Lin, MD, FACC</h3>
+                            <p class="specialist-bio">Cardiovascular Disease & Hypertension</p>
+                            <div class="spec-meta-row">
+                                <span class="spec-fee">$250.00</span>
+                                <span class="spec-time">09:00 - 17:00</span>
+                            </div>
+                            <button type="button" class="spec-book-btn" data-prompt="I'd like to book an appointment with cardiologist Dr. Sarah Lin">
+                                <i class="ph-bold ph-phone-call"></i> Book with Elena
+                            </button>
+                        </div>
+
+                        <div class="specialist-card" data-doctor="Dr. Rajesh Mehta" data-dept="General Medicine">
+                            <div class="specialist-top">
+                                <div class="specialist-avatar card-ava-teal">
+                                    <i class="ph-duotone ph-first-aid"></i>
+                                </div>
+                                <span class="spec-dept-pill">Internal Medicine</span>
+                            </div>
+                            <h3 class="specialist-name">Dr. Rajesh Mehta, MD</h3>
+                            <p class="specialist-bio">Internal Medicine & Preventive Health</p>
+                            <div class="spec-meta-row">
+                                <span class="spec-fee">$150.00</span>
+                                <span class="spec-time">08:30 - 18:00</span>
+                            </div>
+                            <button type="button" class="spec-book-btn" data-prompt="Please schedule a general checkup with Dr. Rajesh Mehta">
+                                <i class="ph-bold ph-phone-call"></i> Book with Elena
+                            </button>
+                        </div>
+
+                        <div class="specialist-card" data-doctor="Dr. Priya Sharma" data-dept="Dermatology">
+                            <div class="specialist-top">
+                                <div class="specialist-avatar card-ava-amber">
+                                    <i class="ph-duotone ph-sparkle"></i>
+                                </div>
+                                <span class="spec-dept-pill">Dermatology</span>
+                            </div>
+                            <h3 class="specialist-name">Dr. Priya Sharma, MD, FAAD</h3>
+                            <p class="specialist-bio">Clinical Dermatology & Skin Diagnostics</p>
+                            <div class="spec-meta-row">
+                                <span class="spec-fee">$200.00</span>
+                                <span class="spec-time">09:00 - 17:30</span>
+                            </div>
+                            <button type="button" class="spec-book-btn" data-prompt="I want to book a skin exam with dermatologist Dr. Priya Sharma">
+                                <i class="ph-bold ph-phone-call"></i> Book with Elena
+                            </button>
+                        </div>
+
+                        <div class="specialist-card" data-doctor="Dr. Marcus Vance" data-dept="Orthopedics">
+                            <div class="specialist-top">
+                                <div class="specialist-avatar card-ava-indigo">
+                                    <i class="ph-duotone ph-person-simple-walk"></i>
+                                </div>
+                                <span class="spec-dept-pill">Orthopedics</span>
+                            </div>
+                            <h3 class="specialist-name">Dr. Marcus Vance, MD</h3>
+                            <p class="specialist-bio">Joint Reconstruction & Sports Medicine</p>
+                            <div class="spec-meta-row">
+                                <span class="spec-fee">$275.00</span>
+                                <span class="spec-time">10:00 - 18:00</span>
+                            </div>
+                            <button type="button" class="spec-book-btn" data-prompt="Book an orthopedic consultation with Dr. Marcus Vance">
+                                <i class="ph-bold ph-phone-call"></i> Book with Elena
+                            </button>
+                        </div>
+
+                        <div class="specialist-card" data-doctor="Dr. Emily Chen" data-dept="Pediatrics">
+                            <div class="specialist-top">
+                                <div class="specialist-avatar card-ava-pink">
+                                    <i class="ph-duotone ph-baby"></i>
+                                </div>
+                                <span class="spec-dept-pill">Pediatrics</span>
+                            </div>
+                            <h3 class="specialist-name">Dr. Emily Chen, MD, FAAP</h3>
+                            <p class="specialist-bio">Pediatric Primary Care & Immunization</p>
+                            <div class="spec-meta-row">
+                                <span class="spec-fee">$175.00</span>
+                                <span class="spec-time">09:00 - 16:30</span>
+                            </div>
+                            <button type="button" class="spec-book-btn" data-prompt="I need a pediatric appointment with Dr. Emily Chen">
+                                <i class="ph-bold ph-phone-call"></i> Book with Elena
+                            </button>
+                        </div>
+
+                        <div class="specialist-card" data-doctor="Dr. Alexander Ross" data-dept="Dental">
+                            <div class="specialist-top">
+                                <div class="specialist-avatar card-ava-emerald">
+                                    <i class="ph-duotone ph-tooth"></i>
+                                </div>
+                                <span class="spec-dept-pill">Dentistry</span>
+                            </div>
+                            <h3 class="specialist-name">Dr. Alexander Ross, DDS</h3>
+                            <p class="specialist-bio">Preventive & Restorative Dentistry</p>
+                            <div class="spec-meta-row">
+                                <span class="spec-fee">$140.00</span>
+                                <span class="spec-time">08:00 - 16:00</span>
+                            </div>
+                            <button type="button" class="spec-book-btn" data-prompt="Book a dental cleaning with Dr. Alexander Ross">
+                                <i class="ph-bold ph-phone-call"></i> Book with Elena
+                            </button>
+                        </div>
                     </div>
                 </div>
 

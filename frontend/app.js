@@ -7,6 +7,20 @@ const statusText = document.getElementById('status-text');
 const transcriptArea = document.getElementById('transcript-area');
 let thinkingIndicator = null;
 
+// Dual-Sided Speaker Pods & Telemetry
+const podElena = document.getElementById('pod-elena');
+const podUser = document.getElementById('pod-user');
+const elenaStatusText = document.getElementById('elena-status-text');
+const userStatusText = document.getElementById('user-status-text');
+const micTestBtn = document.getElementById('mic-test-btn');
+let userAnalyser = null;
+let userAudioMonitorActive = false;
+let preflightMicStream = null;
+let preflightAudioCtx = null;
+let preflightAnalyser = null;
+let preflightMonitorActive = false;
+
+
 // WebSocket and Audio state
 let ws = null;
 let workletNode = null;        // AudioWorkletNode (runs on audio rendering thread, replaces ScriptProcessorNode)
@@ -53,9 +67,11 @@ async function startCall() {
         
         // 2. Setup WebSocket Connection
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        let wsHost = window.location.host || '127.0.0.1:8000';
-        if (wsHost.includes(':3000')) {
-            wsHost = wsHost.replace(':3000', ':8000');
+        const urlParams = new URLSearchParams(window.location.search);
+        const explicitPort = urlParams.get('backend') || urlParams.get('port');
+        let wsHost = explicitPort ? `127.0.0.1:${explicitPort}` : (window.location.host || '127.0.0.1:8005');
+        if (wsHost.includes(':3000') || wsHost.includes(':3001') || wsHost.includes(':5500') || wsHost.includes(':5173')) {
+            wsHost = wsHost.replace(/:\d+$/, ':8005');
         }
         ws = new WebSocket(`${wsProtocol}//${wsHost}/ws/audio`);
         
@@ -99,11 +115,18 @@ async function startCall() {
                     assistantSpeaking = (data.message === "speaking");
                     
                     if (assistantSpeaking) {
-                        visualizerEl.classList.add('speaking');
+                        if (visualizerEl) visualizerEl.classList.add('speaking');
                         callInterface.classList.add('speaking-state');
+                        if (podElena) podElena.classList.add('elena-speaking');
+                        if (elenaStatusText) elenaStatusText.textContent = "Speaking to you...";
+                        if (podUser) podUser.classList.remove('user-speaking');
+                        if (userStatusText) userStatusText.textContent = "Listening to Elena";
                     } else {
-                        visualizerEl.classList.remove('speaking');
+                        if (visualizerEl) visualizerEl.classList.remove('speaking');
                         callInterface.classList.remove('speaking-state');
+                        if (podElena) podElena.classList.remove('elena-speaking');
+                        if (elenaStatusText) elenaStatusText.textContent = "Listening...";
+                        if (userStatusText) userStatusText.textContent = "Mic Active";
                     }
                     
                     if (data.message === "thinking") {
@@ -126,8 +149,12 @@ async function startCall() {
                         currentAudio = null;
                     }
                     assistantSpeaking = false;
-                    visualizerEl.classList.remove('speaking');
+                    if (visualizerEl) visualizerEl.classList.remove('speaking');
                     callInterface.classList.remove('speaking-state');
+                    if (podElena) podElena.classList.remove('elena-speaking');
+                    if (elenaStatusText) elenaStatusText.textContent = "Listening...";
+                    if (podUser) podUser.classList.remove('user-speaking');
+                    if (userStatusText) userStatusText.textContent = "Mic Active";
                     statusText.textContent = "🎤 Listening...";
                     // Tell backend we've stopped playback
                     if (isConnected && ws.readyState === WebSocket.OPEN) {
@@ -136,8 +163,8 @@ async function startCall() {
                 }
                 
                 if (data.type === "transcript" && data.final) {
-                    const speakerLabel = data.speaker === "assistant" ? "Elena Assistant" : "You";
-                    appendTranscriptLine(speakerLabel, data.text);
+                    // Pass data.speaker directly ("assistant" or "user")
+                    appendTranscriptLine(data.speaker || "user", data.text);
                 }
             } else {
                 // Binary data received (TTS audio)
@@ -175,6 +202,17 @@ async function startStreaming(stream) {
     await audioContext.audioWorklet.addModule('audio-processor.js');
 
     audioInput = audioContext.createMediaStreamSource(stream);
+
+    // Setup User Mic Live Analyser for real-time visualizer on Right-Hand side
+    try {
+        userAnalyser = audioContext.createAnalyser();
+        userAnalyser.fftSize = 64;
+        userAnalyser.smoothingTimeConstant = 0.35;
+        audioInput.connect(userAnalyser);
+        startUserAudioMonitor();
+    } catch (e) {
+        console.warn("Could not attach mic analyser:", e);
+    }
 
     // Create the worklet node: mono input (1 channel), no output needed
     workletNode = new AudioWorkletNode(audioContext, 'pcm-processor', {
@@ -229,8 +267,11 @@ async function playReceivedAudio(blob) {
             }
             URL.revokeObjectURL(audioUrl);
             assistantSpeaking = false;
-            visualizerEl.classList.remove('speaking');
+            if (visualizerEl) visualizerEl.classList.remove('speaking');
             callInterface.classList.remove('speaking-state');
+            if (podElena) podElena.classList.remove('elena-speaking');
+            if (elenaStatusText) elenaStatusText.textContent = "Listening...";
+            if (userStatusText) userStatusText.textContent = "Mic Active";
             if (isConnected && ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({type: "playback_ended"}));
             }
@@ -247,6 +288,9 @@ async function playReceivedAudio(blob) {
             callInterface.classList.remove('speaking-state');
         };
 
+        assistantSpeaking = true;
+        if (podElena) podElena.classList.add('elena-speaking');
+        if (elenaStatusText) elenaStatusText.textContent = "Speaking to you...";
         await audio.play();
     } catch (err) {
         console.error("Error playing TTS audio:", err);
@@ -268,8 +312,14 @@ async function playReceivedAudio(blob) {
 function endCall() {
     isConnected = false;
     assistantSpeaking = false;
-    visualizerEl.classList.remove('speaking');
+    userAudioMonitorActive = false;
+    userAnalyser = null;
+    if (visualizerEl) visualizerEl.classList.remove('speaking');
     callInterface.classList.remove('speaking-state');
+    if (podElena) podElena.classList.remove('elena-speaking');
+    if (podUser) podUser.classList.remove('user-speaking');
+    if (elenaStatusText) elenaStatusText.textContent = "Connected";
+    if (userStatusText) userStatusText.textContent = "Mic Ready";
 
     if (currentAudio) {
         try {
@@ -333,11 +383,23 @@ function endCall() {
 
 function appendTranscriptLine(speaker, text) {
     removeThinkingIndicator(); // Just in case
-    const isAssistant = speaker === "assistant";
+    // Handle both raw codes ("assistant", "user") and any labels
+    const isAssistant = speaker === "assistant" || speaker === "Elena Assistant" || speaker === "Elena";
     
     const bubble = document.createElement("div");
     bubble.className = `chat-bubble ${isAssistant ? 'bubble-assistant' : 'bubble-user'}`;
-    bubble.textContent = text;
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
+    bubble.innerHTML = `
+        <div class="bubble-meta">
+            <div class="bubble-sender">
+                <span class="bubble-icon"><i class="${isAssistant ? 'ph-fill ph-stethoscope' : 'ph-fill ph-user'}"></i></span>
+                <span class="bubble-author">${isAssistant ? 'Elena Vance • Care Concierge' : 'You (Patient)'}</span>
+            </div>
+            <span class="bubble-time">${timeStr}</span>
+        </div>
+        <div class="bubble-content">${escapeHtml(text)}</div>
+    `;
     
     transcriptArea.appendChild(bubble);
     transcriptArea.scrollTop = transcriptArea.scrollHeight;
@@ -348,6 +410,8 @@ function showThinkingIndicator() {
     thinkingIndicator = document.createElement("div");
     thinkingIndicator.className = "chat-bubble bubble-thinking";
     thinkingIndicator.innerHTML = `
+        <span class="bubble-icon" style="color: #2dd4bf;"><i class="ph-fill ph-stethoscope"></i></span>
+        <span class="thinking-text">Elena is thinking...</span>
         <div class="typing-dot"></div>
         <div class="typing-dot"></div>
         <div class="typing-dot"></div>
@@ -361,6 +425,45 @@ function removeThinkingIndicator() {
         thinkingIndicator.parentNode.removeChild(thinkingIndicator);
     }
     thinkingIndicator = null;
+}
+
+// Live User Mic Equalizer Monitor (Animates Right-Hand Side)
+function startUserAudioMonitor() {
+    userAudioMonitorActive = true;
+    const userBars = document.querySelectorAll('#user-bars .eq-bar');
+    
+    function monitor() {
+        if (!userAudioMonitorActive || !userAnalyser) return;
+        
+        const data = new Uint8Array(userAnalyser.frequencyBinCount);
+        userAnalyser.getByteFrequencyData(data);
+        
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i];
+        const avg = sum / data.length;
+        
+        // Active speaking detection: energy threshold and assistant is quiet
+        if (avg > 14 && !assistantSpeaking) {
+            if (podUser) podUser.classList.add('user-speaking');
+            if (userStatusText) userStatusText.textContent = "Speaking...";
+            
+            userBars.forEach((bar, idx) => {
+                const val = data[idx % data.length] || avg;
+                const h = Math.max(4, Math.min(18, (val / 255) * 22));
+                bar.style.height = `${h}px`;
+            });
+        } else {
+            if (podUser) podUser.classList.remove('user-speaking');
+            if (userStatusText && !assistantSpeaking) userStatusText.textContent = "Mic Active";
+            userBars.forEach(bar => {
+                bar.style.height = '4px';
+            });
+        }
+        
+        requestAnimationFrame(monitor);
+    }
+    
+    requestAnimationFrame(monitor);
 }
 
 // ==========================================
@@ -825,7 +928,18 @@ function appendChatBubble(speaker, text) {
     const isAssistant = speaker === 'assistant';
     const bubble = document.createElement('div');
     bubble.className = `chat-bubble ${isAssistant ? 'bubble-assistant' : 'bubble-user'}`;
-    bubble.textContent = text;
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
+    bubble.innerHTML = `
+        <div class="bubble-meta">
+            <div class="bubble-sender">
+                <span class="bubble-icon"><i class="${isAssistant ? 'ph-fill ph-stethoscope' : 'ph-fill ph-user'}"></i></span>
+                <span class="bubble-author">${isAssistant ? 'Elena Vance • Care Concierge' : 'You (Patient)'}</span>
+            </div>
+            <span class="bubble-time">${timeStr}</span>
+        </div>
+        <div class="bubble-content">${escapeHtml(text)}</div>
+    `;
     
     chatMessagesArea.appendChild(bubble);
     chatMessagesArea.scrollTop = chatMessagesArea.scrollHeight;
@@ -869,3 +983,113 @@ function removeChatThinking() {
 }
 
 
+
+
+// ==========================================
+// PRE-FLIGHT MIC TEST & INTERACTIVE ACTIONS
+// ==========================================
+
+if (micTestBtn) {
+    micTestBtn.addEventListener('click', togglePreflightMicTest);
+}
+
+async function togglePreflightMicTest() {
+    const label = document.getElementById('mic-test-label');
+    const mBars = document.querySelectorAll('#mic-level-meter .m-bar');
+    
+    if (preflightMonitorActive) {
+        // Stop test
+        preflightMonitorActive = false;
+        if (preflightMicStream) {
+            preflightMicStream.getTracks().forEach(t => t.stop());
+            preflightMicStream = null;
+        }
+        if (preflightAudioCtx) {
+            preflightAudioCtx.close();
+            preflightAudioCtx = null;
+        }
+        micTestBtn.classList.remove('testing');
+        if (label) label.textContent = "Test Mic";
+        mBars.forEach(b => {
+            b.style.height = "4px";
+            b.classList.remove('lit');
+        });
+        return;
+    }
+    
+    try {
+        preflightMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        preflightAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        preflightAnalyser = preflightAudioCtx.createAnalyser();
+        preflightAnalyser.fftSize = 64;
+        
+        const src = preflightAudioCtx.createMediaStreamSource(preflightMicStream);
+        src.connect(preflightAnalyser);
+        
+        preflightMonitorActive = true;
+        micTestBtn.classList.add('testing');
+        if (label) label.textContent = "Testing (Speak!)";
+        
+        function updatePreflightMeter() {
+            if (!preflightMonitorActive || !preflightAnalyser) return;
+            const data = new Uint8Array(preflightAnalyser.frequencyBinCount);
+            preflightAnalyser.getByteFrequencyData(data);
+            
+            let sum = 0;
+            for (let i = 0; i < data.length; i++) sum += data[i];
+            const avg = sum / data.length;
+            const normalized = Math.min(5, Math.floor((avg / 100) * 5));
+            
+            mBars.forEach((bar, idx) => {
+                if (idx <= normalized && avg > 10) {
+                    bar.style.height = `${Math.min(14, 4 + idx * 2.5)}px`;
+                    bar.classList.add('lit');
+                } else {
+                    bar.style.height = "4px";
+                    bar.classList.remove('lit');
+                }
+            });
+            
+            requestAnimationFrame(updatePreflightMeter);
+        }
+        
+        requestAnimationFrame(updatePreflightMeter);
+    } catch (e) {
+        console.error("Mic test error:", e);
+        if (label) label.textContent = "Mic Denied";
+    }
+}
+
+// Quick Prompt Chips & Doctor Book Buttons
+document.querySelectorAll('.quick-chip, .spec-book-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const prompt = btn.getAttribute('data-prompt');
+        if (!prompt) return;
+        
+        if (isConnected && ws && ws.readyState === WebSocket.OPEN) {
+            // Already in voice call: show user statement in transcript
+            appendTranscriptLine("user", prompt);
+            statusText.textContent = "⚡ Inquired with Elena...";
+        } else {
+            // Switch to chat mode or start call
+            if (modeChatBtn && chatInput && chatForm) {
+                modeChatBtn.click();
+                chatInput.value = prompt;
+                chatForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+            } else if (callBtn) {
+                callBtn.click();
+            }
+        }
+    });
+});
+
+// In-Call Quick Speech Chips
+document.querySelectorAll('.incall-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const speakText = btn.getAttribute('data-speak');
+        if (!speakText) return;
+        if (isConnected && ws && ws.readyState === WebSocket.OPEN) {
+            appendTranscriptLine("user", speakText);
+        }
+    });
+});

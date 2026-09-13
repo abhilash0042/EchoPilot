@@ -1,22 +1,30 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Ensure .env in backend directory is always loaded regardless of current working directory
+_env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=_env_path)
+load_dotenv()  # also load root .env if present
 
 BELFRY_BASE_URL = os.getenv("BELFRY_BASE_URL", "http://localhost:8001/api/v1")
 BELFRY_TENANT_ID = os.getenv("BELFRY_TENANT_ID", "belfry-local")
 BELFRY_PROJECT_ID = os.getenv("BELFRY_PROJECT_ID", "proj_5e0b58be7d5a")
-BELFRY_API_KEY = os.getenv("BELFRY_API_KEY") or os.getenv("BELFRY_LABS_API_KEY", "")
+BELFRY_API_KEY = (os.getenv("BELFRY_API_KEY") or os.getenv("BELFRY_LABS_API_KEY", "")).strip()
 
-try:
-    from belfry_labs import AsyncBelfryLabsClient
-    client = AsyncBelfryLabsClient(
-        api_key=BELFRY_API_KEY,
-        base_url=BELFRY_BASE_URL,
-        tenant_id=BELFRY_TENANT_ID
-    )
-except ImportError:
-    client = None
+client = None
+if BELFRY_API_KEY:
+    try:
+        from belfry_labs import AsyncBelfryLabsClient
+        client = AsyncBelfryLabsClient(
+            api_key=BELFRY_API_KEY,
+            base_url=BELFRY_BASE_URL,
+            tenant_id=BELFRY_TENANT_ID
+        )
+    except ImportError:
+        client = None
+else:
+    print("[Belfry SDK] Notice: BELFRY_API_KEY is not configured; SDK calls will bypass gracefully.")
 
 async def belfry_check_input(text: str) -> dict:
     """Check user input BEFORE sending to LLM using Belfry SDK."""
