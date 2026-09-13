@@ -308,76 +308,125 @@ async function playReceivedAudio(blob) {
 }
 
 function endCall() {
+    console.log("[endCall] Immediately ending call session...");
     isConnected = false;
     assistantSpeaking = false;
     userAudioMonitorActive = false;
     userAnalyser = null;
-    if (visualizerEl) visualizerEl.classList.remove('speaking');
-    callInterface.classList.remove('speaking-state');
-    if (podElena) podElena.classList.remove('elena-speaking');
-    if (podUser) podUser.classList.remove('user-speaking');
-    if (elenaStatusText) elenaStatusText.textContent = "Connected";
-    if (userStatusText) userStatusText.textContent = "Mic Ready";
+    clientBargeInSpeechFrames = 0;
 
+    // 1. INSTANT UI RESET (Synchronous - zero delay, no stuck screen)
+    try {
+        if (callTimerInterval) {
+            clearInterval(callTimerInterval);
+            callTimerInterval = null;
+        }
+        if (callTimerEl) callTimerEl.textContent = "00:00";
+        
+        if (visualizerEl) visualizerEl.classList.remove('speaking');
+        if (callInterface) {
+            callInterface.classList.remove('speaking-state');
+            callInterface.classList.remove('active');
+            callInterface.classList.add('hidden');
+        }
+        if (callActionArea) {
+            callActionArea.classList.remove('hidden');
+        }
+        const heroSection = document.querySelector('.hero-section');
+        if (heroSection) heroSection.classList.remove('in-call');
+        
+        if (podElena) podElena.classList.remove('elena-speaking');
+        if (podUser) podUser.classList.remove('user-speaking');
+        if (elenaStatusText) elenaStatusText.textContent = "Connected";
+        if (userStatusText) userStatusText.textContent = "Mic Ready";
+        if (statusText) statusText.textContent = "Call ended. Ready to connect.";
+    } catch (uiErr) {
+        console.warn("UI reset notice in endCall:", uiErr);
+    }
+
+    // 2. Stop audio playback immediately
     if (currentAudio) {
         try {
             currentAudio.onended = null;
             currentAudio.onerror = null;
             currentAudio.pause();
+            currentAudio.currentTime = 0;
             if (currentAudio.src && currentAudio.src.startsWith('blob:')) {
                 URL.revokeObjectURL(currentAudio.src);
             }
         } catch (e) {}
         currentAudio = null;
     }
-    
-    if (callTimerInterval) {
-        clearInterval(callTimerInterval);
-        callTimerInterval = null;
+
+    // 3. Stop microphone tracks
+    if (mediaStream) {
+        try {
+            mediaStream.getTracks().forEach(track => {
+                try { track.stop(); } catch (e) {}
+            });
+        } catch (e) {}
+        mediaStream = null;
     }
-    
+
+    // 4. Disconnect Web Audio nodes
     if (workletNode) {
-        workletNode.port.onmessage = null;  // detach message handler before disconnecting
-        workletNode.disconnect();
+        try {
+            workletNode.port.onmessage = null;
+            workletNode.disconnect();
+        } catch (e) {}
         workletNode = null;
     }
     if (audioInput) {
-        audioInput.disconnect();
+        try { audioInput.disconnect(); } catch (e) {}
         audioInput = null;
     }
-    
-    if (mediaStream) {
-        mediaStream.getTracks().forEach(track => track.stop());
-        mediaStream = null;
-    }
-    
-    if (ws) {
-        ws.close();
-        ws = null;
-    }
-    
-    // Close audio context
+
+    // 5. Close audio contexts safely
     if (audioContext) {
-        audioContext.close();
+        try {
+            if (audioContext.state !== 'closed') {
+                audioContext.close().catch(() => {});
+            }
+        } catch (e) {}
         audioContext = null;
     }
     if (playbackContext) {
-        playbackContext.close();
+        try {
+            if (playbackContext.state !== 'closed') {
+                playbackContext.close().catch(() => {});
+            }
+        } catch (e) {}
         playbackContext = null;
     }
-    
-    // UI Reset
-    const heroSection = document.querySelector('.hero-section');
-    if (heroSection) heroSection.classList.remove('in-call');
 
-    callInterface.classList.remove('active');
-    setTimeout(() => {
-        callInterface.classList.add('hidden');
-        callActionArea.classList.remove('hidden');
-        statusText.textContent = "Call ended. Ready to connect.";
-        transcriptArea.innerHTML = "";
-    }, 400);
+    // 6. Close WebSocket connection cleanly (detach handlers to avoid recursion)
+    if (ws) {
+        try {
+            ws.onclose = null;
+            ws.onerror = null;
+            if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+                ws.close(1000, "User ended call");
+            }
+        } catch (e) {}
+        ws = null;
+    }
+    console.log("[endCall] Call terminated successfully.");
 }
+
+// Global click & key listeners for bulletproof End Call triggering
+document.addEventListener('click', (e) => {
+    if (e.target && (e.target.id === 'end-call-btn' || e.target.closest('#end-call-btn'))) {
+        e.preventDefault();
+        e.stopPropagation();
+        endCall();
+    }
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isConnected) {
+        endCall();
+    }
+});
 
 function appendTranscriptLine(speaker, text) {
     removeThinkingIndicator(); // Just in case

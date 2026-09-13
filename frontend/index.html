@@ -163,9 +163,17 @@
 
                     <!-- Dual-Sided Call Interface (Shown while on call) -->
                     <div id="call-interface" class="glass-panel call-interface hidden">
-                        <!-- Dual Speaker Stage (Elena Left vs Patient Right) -->
+                        <!-- Top Call Status & Timer Bar -->
+                        <div class="call-top-bar">
+                            <div class="hub-timer-badge">
+                                <span class="live-dot"></span>
+                                <span id="call-timer" class="call-timer">00:00</span>
+                            </div>
+                        </div>
+
+                        <!-- Clean Dual-Speaker Stage: Elena Left vs You Right -->
                         <div class="dual-speaker-stage">
-                            <!-- Left Stage: Elena Vance -->
+                            <!-- Left: Elena -->
                             <div class="speaker-pod speaker-elena" id="pod-elena">
                                 <div class="pod-avatar-wrap">
                                     <div class="avatar-ring elena-ring">
@@ -173,19 +181,13 @@
                                             <i class="ph-fill ph-user-circle"></i>
                                         </div>
                                     </div>
-                                    <span class="pod-badge-icon"><i class="ph-fill ph-stethoscope"></i></span>
                                 </div>
                                 <div class="pod-details">
-                                    <div class="pod-name-row">
-                                        <h4>Elena Vance</h4>
-                                        <span class="verified-check" title="Verified Care Coordinator"><i class="ph-fill ph-check-circle"></i></span>
-                                    </div>
-                                    <p class="pod-role">Senior Care Coordinator</p>
+                                    <h3 class="speaker-title">Elena</h3>
                                     <div class="speaker-state-pill" id="elena-status-pill">
                                         <span class="pill-dot"></span>
                                         <span id="elena-status-text">Connected</span>
                                     </div>
-                                    <!-- Dynamic Equalizer Bars for Elena -->
                                     <div class="audio-equalizer elena-equalizer" id="elena-bars">
                                         <span class="eq-bar"></span>
                                         <span class="eq-bar"></span>
@@ -196,43 +198,14 @@
                                 </div>
                             </div>
 
-                            <!-- Center Hub: Call Telemetry & End Call -->
-                            <div class="call-hub">
-                                <div class="hub-timer-badge">
-                                    <span class="live-dot"></span>
-                                    <span id="call-timer" class="call-timer">00:00</span>
-                                </div>
-                                
-                                <div class="central-wave-bridge">
-                                    <div class="bridge-line"></div>
-                                    <span class="bridge-tag">DUPLEX AUDIO LINK</span>
-                                    <div class="bridge-line"></div>
-                                </div>
-
-                                <button id="end-call-btn" class="end-call-btn" title="End Consultation">
-                                    <i class="ph-fill ph-phone-slash"></i>
-                                    <span>End Call</span>
-                                </button>
-                                
-                                <div class="barge-in-tip">
-                                    <i class="ph-fill ph-sparkle"></i>
-                                    <span>Natural conversation: speak anytime to interrupt Elena</span>
-                                </div>
-                            </div>
-
-                            <!-- Right Stage: You / Patient -->
+                            <!-- Right: You -->
                             <div class="speaker-pod speaker-user" id="pod-user">
                                 <div class="pod-details user-details">
-                                    <div class="pod-name-row user-name-row">
-                                        <h4>You</h4>
-                                        <span class="caller-chip">Caller</span>
-                                    </div>
-                                    <p class="pod-role">Patient Desk / Mic Audio</p>
+                                    <h3 class="speaker-title">You</h3>
                                     <div class="speaker-state-pill user-pill" id="user-status-pill">
                                         <span class="pill-dot"></span>
                                         <span id="user-status-text">Mic Active</span>
                                     </div>
-                                    <!-- Dynamic Real-time Equalizer Bars for User's Voice -->
                                     <div class="audio-equalizer user-equalizer" id="user-bars">
                                         <span class="eq-bar"></span>
                                         <span class="eq-bar"></span>
@@ -247,44 +220,27 @@
                                             <i class="ph-fill ph-user"></i>
                                         </div>
                                     </div>
-                                    <span class="pod-badge-icon mic-badge"><i class="ph-fill ph-microphone"></i></span>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- In-Call Interactive Quick Suggestions -->
-                        <div class="in-call-suggestions">
-                            <span class="in-call-label">Quick Responses:</span>
-                            <div class="in-call-chips-group">
-                                <button type="button" class="incall-chip" data-speak="Tomorrow at 10 AM works great for me.">
-                                    "Tomorrow at 10 AM"
-                                </button>
-                                <button type="button" class="incall-chip" data-speak="What is the doctor's consultation fee?">
-                                    "What is the fee?"
-                                </button>
-                                <button type="button" class="incall-chip" data-speak="Yes, please go ahead and confirm my booking.">
-                                    "Yes, please confirm"
-                                </button>
-                                <button type="button" class="incall-chip" data-speak="Could you check other available times?">
-                                    "Check other times"
-                                </button>
-                            </div>
+                        <!-- Prominent, Centered End Call Button -->
+                        <div class="end-call-row">
+                            <button id="end-call-btn" class="end-call-btn" title="End Call" type="button">
+                                <i class="ph-fill ph-phone-slash"></i>
+                                <span>End Call</span>
+                            </button>
                         </div>
 
-                        <!-- Transcript Area (Left-side Elena bubbles, Right-side User bubbles) -->
+                        <!-- Transcript Area: Elena Left, You Right -->
                         <div class="transcript-wrapper">
-                            <div class="transcript-header">
-                                <span><i class="ph-duotone ph-chat-centered-text"></i> Live Consultation Dialogue</span>
-                                <span class="transcript-tag">Dual-Channel Sync</span>
-                            </div>
                             <div class="transcript-area" id="transcript-area">
-                                <!-- Chat bubbles dynamically injected by JS: Elena on Left, You on Right -->
+                                <!-- Chat bubbles dynamically injected here -->
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 2. Text Chatbot Mode Container -->
                 <div id="chat-mode-section" class="hidden">
                     <div class="glass-panel chat-interface">
                         <div class="chat-header">
