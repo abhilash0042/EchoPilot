@@ -8,6 +8,9 @@ from typing import Optional
 # Indian English & Telugu Expressive Neural Voices
 VOICE_EN = "en-IN-NeerjaNeural"  # Professional, natural human Indian English voice
 VOICE_TE = "te-IN-ShrutiNeural"  # Fluent, natural Telugu voice
+TTS_RATE = os.getenv("TTS_RATE", "-5%")  # slight slowing; -10% made replies drag
+TTS_WATERMARK = os.getenv("TTS_WATERMARK", "").strip().lower() in ("1", "true", "yes")
+_piper_voice = None
 
 # ---------------------------------------------------------------------------
 # TTS Phrase Cache
@@ -36,8 +39,12 @@ async def warm_cache(phrases: list[str]) -> None:
 
 
 def has_telugu(text: str) -> bool:
-    """Check if text contains Telugu script characters (\u0c00 - \u0c7f)."""
-    return any('\u0c00' <= char <= '\u0c7f' for char in text)
+    """Use Telugu voice only when Telugu script is a real share of the line."""
+    letters = [ch for ch in (text or "") if ch.isalpha()]
+    if not letters:
+        return False
+    telugu = sum(1 for ch in letters if "\u0c00" <= ch <= "\u0c7f")
+    return telugu / len(letters) >= 0.25
 
 def inject_ai_watermark(audio_bytes: bytes) -> bytes:
     """Injects an ID3v2 metadata header into the MP3 stream to declare it as machine-generated AI speech."""
@@ -130,7 +137,7 @@ async def _synthesize_azure(text: str, voice: str) -> bytes:
         )
         ssml = (
             f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{lang}">'
-            f'<voice name="{voice}"><prosody rate="-10%">{safe}</prosody></voice></speak>'
+            f'<voice name="{voice}"><prosody rate="{TTS_RATE}">{safe}</prosody></voice></speak>'
         )
         result = await loop.run_in_executor(
             None,
@@ -150,14 +157,14 @@ async def _synthesize_azure(text: str, voice: str) -> bytes:
 async def _synthesize_edge(text: str, voice: str) -> bytes:
     """Synthesize using edge-tts (Tier 2 — streamed, no temp file)."""
     try:
-        communicate = edge_tts.Communicate(text, voice, rate="-10%", pitch="+2Hz")
+        communicate = edge_tts.Communicate(text, voice, rate=TTS_RATE, pitch="+2Hz")
         chunks: list[bytes] = []
         async for part in communicate.stream():
             if part.get("type") == "audio" and part.get("data"):
                 chunks.append(part["data"])
         if chunks:
             return b"".join(chunks)
-        communicate = edge_tts.Communicate(text, voice, rate="-10%", pitch="+2Hz")
+        communicate = edge_tts.Communicate(text, voice, rate=TTS_RATE, pitch="+2Hz")
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
             tmp_path = tmp.name
         try:
@@ -172,21 +179,30 @@ async def _synthesize_edge(text: str, voice: str) -> bytes:
         return b""
 
 
+def _get_piper_voice():
+    global _piper_voice
+    if _piper_voice is not None:
+        return _piper_voice
+    from piper.voice import PiperVoice  # type: ignore[import]
+    model_path = os.getenv("PIPER_MODEL_PATH", "")
+    if not model_path or not os.path.exists(model_path):
+        print("[TTS:piper] PIPER_MODEL_PATH not set or file missing — Piper skipped")
+        return None
+    _piper_voice = PiperVoice.load(model_path)
+    print(f"[TTS:piper] Loaded model once from {model_path}")
+    return _piper_voice
+
+
 async def _synthesize_piper(text: str) -> bytes:
     """Synthesize using Piper local TTS (Tier 3 — fully offline fallback)."""
     try:
-        from piper.voice import PiperVoice  # type: ignore[import]
         import wave, io as _io
-        # Lazy-load Piper model from env (defaults to a lightweight en-US model)
-        model_path = os.getenv("PIPER_MODEL_PATH", "")
-        if not model_path or not os.path.exists(model_path):
-            print("[TTS:piper] PIPER_MODEL_PATH not set or file missing — Piper skipped")
+        voice = _get_piper_voice()
+        if voice is None:
             return b""
-        voice = PiperVoice.load(model_path)
         wav_buf = _io.BytesIO()
         with wave.open(wav_buf, "wb") as wf:
             voice.synthesize(text, wf)
-        # Piper outputs WAV — convert to raw bytes (browser can decode WAV via decodeAudioData)
         return wav_buf.getvalue()
     except ImportError:
         return b""
@@ -237,6 +253,16 @@ def _speak_clock(match: re.Match) -> str:
 
 def _speak_phone(match: re.Match) -> str:
     return " ".join(match.group(0))
+
+
+def split_spoken_sentences(text: str) -> list[str]:
+    """Split prepared speech into sentence chunks so TTS can start sooner."""
+    spoken = prepare_speech_text(text)
+    if not spoken:
+        return []
+    parts = re.split(r"(?<=[.!?])\s+", spoken)
+    chunks = [part.strip() for part in parts if part and part.strip()]
+    return chunks or [spoken]
 
 
 def prepare_speech_text(text: str) -> str:
@@ -298,8 +324,8 @@ async def synthesize(text: str) -> bytes:
         print(f"[TTS] All tiers failed for text: '{text[:80]}'")
         return b""
 
-    # Watermark MP3 output (skip for WAV from Piper)
-    if tier_used in ("azure", "edge"):
+    # Live playback skips ID3 tags — some browsers skip the first spoken words.
+    if TTS_WATERMARK and tier_used in ("azure", "edge"):
         audio_bytes = inject_ai_watermark(audio_bytes)
 
     print(f"[TTS:{tier_used}] synthesized {len(audio_bytes)} bytes — '{text[:60]}'")

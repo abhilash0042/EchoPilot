@@ -30,6 +30,11 @@ let playbackContext = null;    // Default sample rate context for PLAYBACK (TTS 
 let isConnected = false;
 let assistantSpeaking = false;
 let mediaStream = null;        // Store reference to close tracks later
+let currentAudio = null;
+let ttsStreamOpen = false;
+let playbackActive = false;
+const playbackQueue = [];
+let assistantSpeakStartedAt = 0;
 
 // Call Timer state
 let callTimerInterval = null;
@@ -113,8 +118,8 @@ async function startCall() {
                 if (data.type === "status") {
                     statusText.textContent = STATUS_MAP[data.message] || data.message;
                     assistantSpeaking = (data.message === "speaking");
-                    
                     if (assistantSpeaking) {
+                        assistantSpeakStartedAt = Date.now();
                         if (visualizerEl) visualizerEl.classList.add('speaking');
                         callInterface.classList.add('speaking-state');
                         if (podElena) podElena.classList.add('elena-speaking');
@@ -136,18 +141,19 @@ async function startCall() {
                     }
                 }
                 
-                if (data.type === "interrupt") {
-                    if (currentAudio) {
-                        try {
-                            currentAudio.onended = null;
-                            currentAudio.onerror = null;
-                            currentAudio.pause();
-                            if (currentAudio.src && currentAudio.src.startsWith('blob:')) {
-                                URL.revokeObjectURL(currentAudio.src);
-                            }
-                        } catch (e) { /* ignore */ }
-                        currentAudio = null;
+                if (data.type === "tts_stream") {
+                    ttsStreamOpen = (data.phase === "start");
+                    if (!ttsStreamOpen && !playbackActive && playbackQueue.length === 0) {
+                        assistantSpeaking = false;
+                        signalPlaybackEnded();
                     }
+                }
+                
+                if (data.type === "interrupt") {
+                    ttsStreamOpen = false;
+                    clearPlaybackQueue();
+                    playbackActive = false;
+                    stopCurrentAudio();
                     assistantSpeaking = false;
                     if (visualizerEl) visualizerEl.classList.remove('speaking');
                     callInterface.classList.remove('speaking-state');
@@ -156,10 +162,6 @@ async function startCall() {
                     if (podUser) podUser.classList.remove('user-speaking');
                     if (userStatusText) userStatusText.textContent = "Mic Active";
                     statusText.textContent = "🎤 Listening...";
-                    // Tell backend we've stopped playback
-                    if (isConnected && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({type: "playback_ended"}));
-                    }
                 }
                 
                 if (data.type === "transcript" && data.final) {
@@ -167,8 +169,8 @@ async function startCall() {
                     appendTranscriptLine(data.speaker || "user", data.text);
                 }
             } else {
-                // Binary data received (TTS audio)
-                playReceivedAudio(event.data);
+                // Binary data received (TTS audio) — queue chunks so sentence streaming plays in order
+                enqueuePlayback(event.data);
             }
         };
         
@@ -235,7 +237,9 @@ async function startStreaming(stream) {
     // Note: workletNode has numberOfOutputs=0, so no further connect() needed.
 }
 
-let currentAudio = null;  // Track currently playing HTMLAudioElement (enables browser AEC reference)
+function clearPlaybackQueue() {
+    playbackQueue.length = 0;
+}
 
 function signalPlaybackEnded() {
     if (isConnected && ws && ws.readyState === WebSocket.OPEN) {
@@ -249,28 +253,57 @@ function detectAudioMime(buffer) {
     return isWav ? "audio/wav" : "audio/mpeg";
 }
 
-async function playReceivedAudio(blob) {
+function enqueuePlayback(blob) {
+    playbackQueue.push(blob);
+    if (!playbackActive) {
+        playNextQueuedAudio();
+    }
+}
+
+async function playNextQueuedAudio() {
+    if (!playbackQueue.length) {
+        playbackActive = false;
+        if (ttsStreamOpen) {
+            return;
+        }
+        assistantSpeaking = false;
+        signalPlaybackEnded();
+        return;
+    }
+    playbackActive = true;
+    const blob = playbackQueue.shift();
+    await playReceivedAudio(blob, { fromQueue: true });
+}
+
+function stopCurrentAudio() {
+    if (currentAudio) {
+        try {
+            currentAudio.onended = null;
+            currentAudio.onerror = null;
+            currentAudio.pause();
+            if (currentAudio.src && currentAudio.src.startsWith('blob:')) {
+                URL.revokeObjectURL(currentAudio.src);
+            }
+        } catch (e) { /* already stopped */ }
+        currentAudio = null;
+    }
+}
+
+async function playReceivedAudio(blob, options = {}) {
+    const fromQueue = options.fromQueue === true;
     try {
         const raw = blob instanceof ArrayBuffer ? blob : await blob.arrayBuffer();
         if (!raw || raw.byteLength < 200) {
             console.warn("[playReceivedAudio] Empty or truncated audio blob, skipping");
-            signalPlaybackEnded();
+            if (fromQueue) {
+                playNextQueuedAudio();
+            } else {
+                signalPlaybackEnded();
+            }
             return;
         }
-        // Stop any currently playing audio to prevent overlapping voices
-        if (currentAudio) {
-            try {
-                currentAudio.onended = null;
-                currentAudio.onerror = null;
-                currentAudio.pause();
-                if (currentAudio.src && currentAudio.src.startsWith('blob:')) {
-                    URL.revokeObjectURL(currentAudio.src);
-                }
-            } catch (e) { /* already stopped */ }
-            currentAudio = null;
-        }
+        stopCurrentAudio();
 
-        // Routing through HTMLAudioElement allows Chromium/WebKit WebRTC AEC to hook into the playback stream
         const audioBlob = new Blob([raw], { type: detectAudioMime(raw) });
         const audioUrl = URL.createObjectURL(audioBlob);
         const audio = new Audio(audioUrl);
@@ -281,6 +314,10 @@ async function playReceivedAudio(blob) {
                 currentAudio = null;
             }
             URL.revokeObjectURL(audioUrl);
+            if (fromQueue) {
+                playNextQueuedAudio();
+                return;
+            }
             assistantSpeaking = false;
             if (visualizerEl) visualizerEl.classList.remove('speaking');
             callInterface.classList.remove('speaking-state');
@@ -297,9 +334,13 @@ async function playReceivedAudio(blob) {
             }
             URL.revokeObjectURL(audioUrl);
             assistantSpeaking = false;
-            visualizerEl.classList.remove('speaking');
-            callInterface.classList.remove('speaking-state');
-            signalPlaybackEnded();
+            if (visualizerEl) visualizerEl.classList.remove('speaking');
+            if (callInterface) callInterface.classList.remove('speaking-state');
+            if (fromQueue) {
+                playNextQueuedAudio();
+            } else {
+                signalPlaybackEnded();
+            }
         };
 
         assistantSpeaking = true;
@@ -307,20 +348,19 @@ async function playReceivedAudio(blob) {
         if (elenaStatusText) elenaStatusText.textContent = "Speaking to you...";
         await audio.play();
     } catch (err) {
-        console.error("Error playing TTS audio:", err);
-        if (currentAudio) {
-            try {
-                currentAudio.pause();
-                if (currentAudio.src && currentAudio.src.startsWith('blob:')) {
-                    URL.revokeObjectURL(currentAudio.src);
-                }
-            } catch (e) {}
-            currentAudio = null;
+        if (err && err.name === "AbortError") {
+            return;
         }
+        console.error("Error playing TTS audio:", err);
+        stopCurrentAudio();
         assistantSpeaking = false;
-        visualizerEl.classList.remove('speaking');
-        callInterface.classList.remove('speaking-state');
-        signalPlaybackEnded();
+        if (visualizerEl) visualizerEl.classList.remove('speaking');
+        if (callInterface) callInterface.classList.remove('speaking-state');
+        if (fromQueue) {
+            playNextQueuedAudio();
+        } else {
+            signalPlaybackEnded();
+        }
     }
 }
 
@@ -362,6 +402,9 @@ function endCall() {
     }
 
     // 2. Stop audio playback immediately
+    clearPlaybackQueue();
+    playbackActive = false;
+    ttsStreamOpen = false;
     if (currentAudio) {
         try {
             currentAudio.onended = null;
@@ -513,22 +556,20 @@ function startUserAudioMonitor() {
         const avg = sum / data.length;
 
         // INSTANT CLIENT-SIDE BARGE-IN:
-        // If Elena is speaking and user starts talking into mic (energy > 20 for ~80ms):
-        if (assistantSpeaking && avg > 20) {
+        // Confirm ~200ms of real speech energy before cutting Elena, then tell
+        // the backend this is an interrupt (do not send playback_ended — that
+        // used to wipe the user's opening words).
+        // Speaker echo must not cut Elena. Client barge-in is disabled; backend
+        // confirms real interrupts with a much higher energy threshold.
+        const CLIENT_BARGE_IN = false;
+        if (CLIENT_BARGE_IN && assistantSpeaking && currentAudio && (Date.now() - assistantSpeakStartedAt) > 800 && avg > 55) {
             clientBargeInSpeechFrames++;
-            if (clientBargeInSpeechFrames >= 2) {
+            if (clientBargeInSpeechFrames >= 6) {
                 console.log("[Barge-in] User began speaking: immediately cutting assistant audio");
-                if (currentAudio) {
-                    try {
-                        currentAudio.onended = null;
-                        currentAudio.onerror = null;
-                        currentAudio.pause();
-                        if (currentAudio.src && currentAudio.src.startsWith('blob:')) {
-                            URL.revokeObjectURL(currentAudio.src);
-                        }
-                    } catch (e) {}
-                    currentAudio = null;
-                }
+                clearPlaybackQueue();
+                playbackActive = false;
+                ttsStreamOpen = false;
+                stopCurrentAudio();
                 assistantSpeaking = false;
                 if (visualizerEl) visualizerEl.classList.remove('speaking');
                 callInterface.classList.remove('speaking-state');
@@ -538,9 +579,8 @@ function startUserAudioMonitor() {
                 if (userStatusText) userStatusText.textContent = "Speaking...";
                 statusText.textContent = "🎤 Listening to you...";
                 
-                // Signal backend immediately that assistant playback was cut by user interruption
                 if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: "playback_ended" }));
+                    ws.send(JSON.stringify({ type: "barge_in" }));
                 }
                 clientBargeInSpeechFrames = 0;
             }

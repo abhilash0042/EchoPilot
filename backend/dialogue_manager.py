@@ -1,3 +1,5 @@
+import re
+
 from booking import BookingSession, BookingState
 from extraction import (
     extract_slots,
@@ -90,12 +92,35 @@ def _confirmation_reply(session: BookingSession) -> str:
     return reply
 
 
+_SECURITY_PROBE = re.compile(
+    r"\b(hack|hacking|jailbreak|exploit|malware|password|api[\s-]?key|"
+    r"secret[\s-]?key|database secret|system prompt|ignore (?:all |your )?previous)\b",
+    re.IGNORECASE,
+)
+
+_WEAK_UTTERANCE = re.compile(r"^(?:hmm+|uh+|um+|maybe|wait|hello|hi|hey)(?:\s+\w+){0,1}[.!?]*$", re.I)
+
+
+def _security_refusal() -> str:
+    return (
+        "I can't help with hacking or sharing secrets. "
+        "I'm the clinic receptionist — I can book appointments or answer clinic questions. "
+        "What can I help you with?"
+    )
+
+
 def handle_turn(session: BookingSession, user_text: str) -> str:
     """Given the current session and what the user just said, advance the
     state machine and return the assistant's next spoken reply."""
 
     if session.state == BookingState.GREETING:
         session.advance()
+
+    if _SECURITY_PROBE.search(user_text or ""):
+        reply = _security_refusal()
+        _remember(session, "user", user_text)
+        _remember(session, "assistant", reply)
+        return reply
 
     remaining = _remaining_fields(session)
     newly_filled: list[str] = []
@@ -116,35 +141,22 @@ def handle_turn(session: BookingSession, user_text: str) -> str:
         _remember(session, "assistant", reply)
         return reply
 
-    clean_text = user_text.strip().lower().rstrip(".!?,")
-    politeness_tokens = {
-        "thank you", "thanks", "thank you so much", "thank you very much",
-        "thx", "okay thank you", "ok thank you", "i want to thank you",
-        "thank you and thank others",
-    }
-    if clean_text in politeness_tokens or clean_text.startswith("thank you"):
-        reply = f"Happy to help! {PROMPTS[session.state]}"
-        _remember(session, "user", user_text)
-        _remember(session, "assistant", reply)
-        return reply
-
     if session.state == BookingState.CONFIRM:
         return _confirmation_reply(session)
 
     if session.state == BookingState.BOOKED:
         session.state = BookingState.COLLECT_SERVICE
         session.slots = type(session.slots)()
-        reply = get_conversational_reply(
-            user_text,
-            "Is there anything else I can help you with?",
-            allow_freeform=True,
-            history=_history(session),
-        )
+        reply = "You're already booked. Want to schedule another appointment?"
         _remember(session, "user", user_text)
         _remember(session, "assistant", reply)
         return reply
 
-    reply = get_conversational_reply(user_text, PROMPTS[session.state], history=_history(session))
+    prompt = PROMPTS.get(session.state, "Could you say that again?")
+    if _WEAK_UTTERANCE.match((user_text or "").strip()):
+        reply = prompt
+    else:
+        reply = get_conversational_reply(user_text, prompt, history=_history(session)) or prompt
     _remember(session, "user", user_text)
     _remember(session, "assistant", reply)
     return reply

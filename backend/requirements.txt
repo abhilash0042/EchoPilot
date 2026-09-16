@@ -9,8 +9,9 @@ edge-tts>=7.0.0
 httpx>=0.25.0
 aiofiles>=24.0.0
 tenacity>=8.0.0
-pydub>=0.25.1
-miniaudio>=1.7
+faster-whisper>=1.0.0
+webrtcvad>=2.0.10
+
 
 # Optional: Azure Cognitive Services Neural TTS (Tier 1 — official, SLA-backed)
 # Activates when AZURE_SPEECH_KEY env var is set. Same voices as edge-tts but licensed.

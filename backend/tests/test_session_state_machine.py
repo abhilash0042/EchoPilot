@@ -392,15 +392,13 @@ class TestSessionStateMachine(unittest.TestCase):
         # Speech threshold must update accordingly
         self.assertAlmostEqual(sim.session.speech_threshold, sim.session.noise_floor_rms * 3.0, delta=1.0)
 
-    def test_07_buffer_cap_15s_drops_head(self):
-        """Buffer cap truncates at 480,000 bytes (15s), preserving the recent tail."""
+    def test_07_buffer_cap_force_finalizes_instead_of_dropping_head(self):
+        """Long utterances set force_finalize and keep the start of the sentence."""
         session = AudioSession()
-        # 16 seconds of audio = 16 * 16000 * 2 = 512,000 bytes
         large_chunk = b"\x01\x02" * (16 * 16000)
         session.add_chunk(large_chunk)
-
-        # Cap must be exactly 480,000 bytes
-        self.assertEqual(len(session.pcm_buffer), 480000)
+        self.assertTrue(session.force_finalize)
+        self.assertGreater(len(session.pcm_buffer), 480000)
 
     def test_08_peak_rms_silence_gate_math(self):
         """Peak-RMS gate accepts quiet speech with trailing silence, but rejects pure silence."""
