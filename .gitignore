@@ -21,3 +21,7 @@ __pycache__/
 # IDEs
 .vscode/
 .idea/
+
+# Large 3D model binary assets (download via project setup script)
+frontend/assets/models/*.vrm
+frontend/assets/models/*.glb

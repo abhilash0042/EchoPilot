@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; media-src 'self' blob: data:; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; font-src 'self' https://fonts.gstatic.com https://unpkg.com; connect-src 'self' ws: wss: http: https:; img-src 'self' data: https:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; media-src 'self' blob: data:; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://unpkg.com; connect-src 'self' ws: wss: http: https: blob: data: https://cdn.jsdelivr.net; img-src 'self' data: https: blob:;">
     <title>Meridian Health | Medical Concierge & Care Coordinator</title>
     <!-- Google Fonts for modern typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -11,6 +11,16 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- Phosphor Icons for elegant UI icons -->
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <!-- 3D WebGL Engine Import Map -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+            "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.1.3/lib/three-vrm.module.js"
+        }
+    }
+    </script>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -175,11 +185,16 @@
                         <div class="dual-speaker-stage">
                             <!-- Left: Elena -->
                             <div class="speaker-pod speaker-elena" id="pod-elena">
-                                <div class="pod-avatar-wrap">
-                                    <div class="avatar-ring elena-ring">
-                                        <div class="avatar elena-avatar">
+                                <div class="pod-avatar-wrap avatar-3d-wrap">
+                                    <div class="avatar-ring elena-ring avatar-3d-ring" id="elena-avatar-ring">
+                                        <canvas id="elena-3d-canvas" class="avatar-3d-canvas" width="240" height="240"></canvas>
+                                        <div class="avatar elena-avatar avatar-fallback" id="elena-fallback-avatar">
                                             <i class="ph-fill ph-user-circle"></i>
                                         </div>
+                                    </div>
+                                    <div class="avatar-state-tag" id="avatar-state-tag">
+                                        <span class="avatar-pulse-dot"></span>
+                                        <span id="avatar-state-text">3D AI ACTIVE</span>
                                     </div>
                                 </div>
                                 <div class="pod-details">
@@ -562,6 +577,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=stt-name-4"></script>
+    <script type="module" src="app.js?v=avatar-3d-v1"></script>
 </body>
 </html>

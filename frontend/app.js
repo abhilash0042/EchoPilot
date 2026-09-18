@@ -1,3 +1,47 @@
+// === 3D Avatar Engine Integration ===
+import { AvatarController } from './avatar.js';
+
+let avatarController = null;
+
+// Initialize 3D avatar on page load
+window.addEventListener('DOMContentLoaded', () => {
+    const canvas = document.getElementById('elena-3d-canvas');
+    if (canvas) {
+        avatarController = new AvatarController(canvas, {
+            modelUrl: 'assets/models/avatar.vrm',
+            onLoaded: (vrm) => {
+                console.log('[App] Elena 3D Avatar loaded and ready!');
+                const stateTag = document.getElementById('avatar-state-text');
+                if (stateTag) stateTag.textContent = 'IDLE';
+            },
+            onError: (err) => {
+                console.warn('[App] 3D Avatar failed to load, using fallback icon.', err);
+                const ring = document.getElementById('elena-avatar-ring');
+                if (ring) ring.style.display = 'none';
+                const fallback = document.getElementById('elena-fallback-avatar');
+                if (fallback) fallback.style.display = 'flex';
+            }
+        });
+    }
+});
+
+// Helper to update avatar state + state tag UI
+function setAvatarState(state) {
+    if (avatarController) avatarController.setState(state);
+    const stateTag = document.getElementById('avatar-state-text');
+    const pod = document.getElementById('pod-elena');
+    if (stateTag) {
+        const labels = { idle: 'IDLE', listening: 'LISTENING', thinking: 'THINKING...', speaking: 'SPEAKING' };
+        stateTag.textContent = labels[state] || state.toUpperCase();
+    }
+    if (pod) {
+        pod.classList.remove('elena-speaking', 'elena-listening', 'elena-thinking');
+        if (state === 'speaking') pod.classList.add('elena-speaking');
+        else if (state === 'listening') pod.classList.add('elena-listening');
+        else if (state === 'thinking') pod.classList.add('elena-thinking');
+    }
+}
+
 // Core UI Elements
 const callBtn = document.getElementById('call-btn');
 const endCallBtn = document.getElementById('end-call-btn');
@@ -122,19 +166,20 @@ async function startCall() {
                         assistantSpeakStartedAt = Date.now();
                         if (visualizerEl) visualizerEl.classList.add('speaking');
                         callInterface.classList.add('speaking-state');
-                        if (podElena) podElena.classList.add('elena-speaking');
+                        setAvatarState('speaking');
                         if (elenaStatusText) elenaStatusText.textContent = "Speaking to you...";
                         if (podUser) podUser.classList.remove('user-speaking');
                         if (userStatusText) userStatusText.textContent = "Listening to Elena";
-                    } else {
+                    } else if (data.message === "listening" || data.message === "transcribing") {
                         if (visualizerEl) visualizerEl.classList.remove('speaking');
                         callInterface.classList.remove('speaking-state');
-                        if (podElena) podElena.classList.remove('elena-speaking');
+                        setAvatarState('listening');
                         if (elenaStatusText) elenaStatusText.textContent = "Listening...";
                         if (userStatusText) userStatusText.textContent = "Mic Active";
                     }
                     
                     if (data.message === "thinking") {
+                        setAvatarState('thinking');
                         showThinkingIndicator();
                     } else {
                         removeThinkingIndicator();
@@ -145,6 +190,7 @@ async function startCall() {
                     ttsStreamOpen = (data.phase === "start");
                     if (!ttsStreamOpen && !playbackActive && playbackQueue.length === 0) {
                         assistantSpeaking = false;
+                        setAvatarState('listening');
                         signalPlaybackEnded();
                     }
                 }
@@ -157,7 +203,9 @@ async function startCall() {
                     assistantSpeaking = false;
                     if (visualizerEl) visualizerEl.classList.remove('speaking');
                     callInterface.classList.remove('speaking-state');
-                    if (podElena) podElena.classList.remove('elena-speaking');
+                    // Avatar barge-in: instant mouth close + switch to listening
+                    if (avatarController) avatarController.bargeIn();
+                    else setAvatarState('listening');
                     if (elenaStatusText) elenaStatusText.textContent = "Listening...";
                     if (podUser) podUser.classList.remove('user-speaking');
                     if (userStatusText) userStatusText.textContent = "Mic Active";
@@ -321,7 +369,7 @@ async function playReceivedAudio(blob, options = {}) {
             assistantSpeaking = false;
             if (visualizerEl) visualizerEl.classList.remove('speaking');
             callInterface.classList.remove('speaking-state');
-            if (podElena) podElena.classList.remove('elena-speaking');
+            setAvatarState('listening');
             if (elenaStatusText) elenaStatusText.textContent = "Listening...";
             if (userStatusText) userStatusText.textContent = "Mic Active";
             signalPlaybackEnded();
@@ -344,8 +392,10 @@ async function playReceivedAudio(blob, options = {}) {
         };
 
         assistantSpeaking = true;
-        if (podElena) podElena.classList.add('elena-speaking');
+        setAvatarState('speaking');
         if (elenaStatusText) elenaStatusText.textContent = "Speaking to you...";
+        // Attach audio to avatar's WebAudio analyser for real-time lip-sync
+        if (avatarController) avatarController.attachAudioSource(audio);
         await audio.play();
     } catch (err) {
         if (err && err.name === "AbortError") {
@@ -392,8 +442,11 @@ function endCall() {
         const heroSection = document.querySelector('.hero-section');
         if (heroSection) heroSection.classList.remove('in-call');
         
-        if (podElena) podElena.classList.remove('elena-speaking');
+        if (podElena) podElena.classList.remove('elena-speaking', 'elena-listening', 'elena-thinking');
         if (podUser) podUser.classList.remove('user-speaking');
+        if (avatarController) avatarController.setState('idle');
+        const stateTag = document.getElementById('avatar-state-text');
+        if (stateTag) stateTag.textContent = 'IDLE';
         if (elenaStatusText) elenaStatusText.textContent = "Connected";
         if (userStatusText) userStatusText.textContent = "Mic Ready";
         if (statusText) statusText.textContent = "Call ended. Ready to connect.";
