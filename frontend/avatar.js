@@ -120,6 +120,11 @@ export class AvatarController {
         rimLight.position.set(0, 2.0, -1.2);
         this.scene.add(rimLight);
 
+        // LookAt target — must be an Object3D so three-vrm can call .getWorldPosition()
+        this.lookAtTarget = new THREE.Object3D();
+        this.lookAtTarget.position.set(0, 1.38, 0.92);
+        this.scene.add(this.lookAtTarget);
+
         // Resize Observer
         this.resizeObserver = new ResizeObserver(() => this.handleResize());
         if (this.container) {
@@ -175,6 +180,11 @@ export class AvatarController {
                 VRMUtils.rotateVRM0(vrm);
 
                 this.scene.add(vrm.scene);
+
+                // Wire the LookAt target (must be Object3D, not Vector3)
+                if (vrm.lookAt && this.lookAtTarget) {
+                    vrm.lookAt.target = this.lookAtTarget;
+                }
 
                 // Initial cute resting expression: subtle warm smile
                 if (vrm.expressionManager) {
@@ -320,7 +330,7 @@ export class AvatarController {
      * Head tracking & eye gaze towards user cursor
      */
     updateLookAt(delta) {
-        if (!this.vrm || !this.vrm.lookAt) return;
+        if (!this.vrm || !this.vrm.lookAt || !this.lookAtTarget) return;
 
         if (this.state === 'thinking') {
             // Contemplative gaze slightly upward-right
@@ -335,9 +345,9 @@ export class AvatarController {
             this.targetGaze.set(0, 1.38, 0.92);
         }
 
-        // Smoothly interpolate gaze position
+        // Smoothly lerp the Object3D's position — three-vrm calls .getWorldPosition() on it
         this.currentGaze.lerp(this.targetGaze, Math.min(delta * 5.0, 1.0));
-        this.vrm.lookAt.target = this.currentGaze;
+        this.lookAtTarget.position.copy(this.currentGaze);
     }
 
     /**
