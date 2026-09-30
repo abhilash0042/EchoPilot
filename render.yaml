@@ -13,3 +13,13 @@ services:
         value: qwen/qwen3.8-27b
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: BELFRY_BASE_URL
+        sync: false
+      - key: BELFRY_TENANT_ID
+        sync: false
+      - key: BELFRY_PROJECT_ID
+        sync: false
+      - key: BELFRY_API_KEY
+        sync: false
+      - key: BELFRY_DEMO_MODE
+        value: "0"

@@ -9,6 +9,9 @@ edge-tts>=7.0.0
 httpx>=0.25.0
 aiofiles>=24.0.0
 tenacity>=8.0.0
+pydantic>=2.0.0
+# Official Belfry Atlas SDK vendored at ../sdk (installed by CI and Render).
+-e ../sdk
 faster-whisper>=1.0.0
 webrtcvad>=2.0.10
 
