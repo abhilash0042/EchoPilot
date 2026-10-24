@@ -6,15 +6,34 @@ Includes sensitive hospital records and customer/patient health data.
 
 import sqlite3
 import os
+import re
 import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-# Database file path
+# Database file path. Vercel functions can only write under /tmp, so the
+# bundled seed database is copied there on first use.
 DB_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.environ.get("DATABASE_PATH", os.path.join(DB_DIR, "meridian_health.db"))
+_BUNDLED_DB = os.path.join(DB_DIR, "meridian_health.db")
+
+
+def _resolve_db_path() -> str:
+    configured = os.environ.get("DATABASE_PATH")
+    if not os.environ.get("VERCEL"):
+        return configured or _BUNDLED_DB
+    dest = configured or "/tmp/meridian_health.db"
+    parent = os.path.dirname(dest)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    if not os.path.exists(dest) and os.path.isfile(_BUNDLED_DB):
+        import shutil
+        shutil.copy2(_BUNDLED_DB, dest)
+    return dest
+
+
+DB_PATH = _resolve_db_path()
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -439,6 +458,101 @@ def get_all_call_logs(limit: int = 50) -> List[Dict[str, Any]]:
     result = [dict(r) for r in rows]
     conn.close()
     return result
+
+
+_CODE_ASK = re.compile(r"\b(icd[-\s]?10|icd10|cpt|diagnosis codes?|procedure codes?)\b", re.I)
+_PRICE_ASK = re.compile(r"\b(cost|price|priced|fee|fees|how much|charge|charges)\b", re.I)
+_SERVICE_STOPWORDS = {"with", "and", "the", "for", "shot", "exam", "test"}
+
+
+def _match_catalog_service(text: str) -> Optional[Dict[str, Any]]:
+    text_l = text.lower()
+    best = None
+    best_score = 0
+    for service in get_all_services():
+        tokens = [
+            word for word in re.findall(r"[a-z0-9]+", service["name"].lower())
+            if len(word) >= 3 and word not in _SERVICE_STOPWORDS
+        ]
+        score = sum(1 for word in tokens if word in text_l)
+        department = service["department"].lower()
+        if department and department in text_l:
+            score += 1
+        if score > best_score:
+            best = service
+            best_score = score
+    return best if best_score >= 1 else None
+
+
+def answer_catalog_question(user_text: str) -> Optional[str]:
+    """Answer price or diagnosis-code questions from stored services only."""
+    text = (user_text or "").strip()
+    if not text:
+        return None
+    asks_code = bool(_CODE_ASK.search(text))
+    asks_price = bool(_PRICE_ASK.search(text))
+    if not asks_code and not asks_price:
+        return None
+
+    service = _match_catalog_service(text)
+    if asks_code and service:
+        return (
+            f"{service['name']} is ${service['price']:.0f} and takes "
+            f"{service['duration_minutes']} minutes. "
+            "We do not have an ICD-10 or other diagnosis code for it on file."
+        )
+    if asks_code:
+        return (
+            "We do not store ICD-10 or other diagnosis codes. "
+            "I can quote a listed service or book a visit."
+        )
+    if service:
+        return (
+            f"{service['name']} is ${service['price']:.0f} and takes about "
+            f"{service['duration_minutes']} minutes."
+        )
+    return (
+        "I can only quote prices that are on file, such as a general checkup "
+        "or a flu vaccination. Which of those would you like?"
+    )
+
+
+def public_catalog_brief() -> str:
+    """Receptionist-safe facts only. No patient records, licenses, or secrets."""
+    try:
+        hospitals = get_all_hospitals()
+        doctors = get_all_doctors()
+        services = get_all_services()
+    except Exception as exc:
+        logger.warning("Clinic catalog unavailable: %s", exc)
+        return "Clinic records are unavailable. Do not invent prices, codes, doctors, or services."
+
+    lines = ["CLINIC RECORDS (the only facts you may state):"]
+    if hospitals:
+        hospital = hospitals[0]
+        lines.append(
+            f"Clinic: {hospital['name']}, {hospital['branch']}. "
+            f"Address: {hospital['address']}. Phone: {hospital['direct_phone']}. "
+            f"Emergency: {hospital['emergency_hotline']}."
+        )
+    lines.append("Services:")
+    for service in services:
+        lines.append(
+            f"- {service['name']} ({service['department']}): ${service['price']:.0f}, "
+            f"{service['duration_minutes']} minutes. {service['description']}"
+        )
+    lines.append("Doctors:")
+    for doctor in doctors:
+        lines.append(
+            f"- {doctor['name']}, {doctor['department']} / {doctor['specialization']}. "
+            f"Consultation fee ${doctor['consultation_fee']:.0f}. "
+            f"Days {doctor['available_days']}. Hours {doctor['available_hours']}."
+        )
+    lines.append(
+        "These records do not include ICD-10 codes, CPT codes, diagnosis codes, "
+        "drug prices, or medical explanations beyond the service descriptions above."
+    )
+    return "\n".join(lines)
 
 
 def get_db_summary() -> Dict[str, Any]:

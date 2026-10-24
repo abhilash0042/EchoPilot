@@ -215,8 +215,14 @@ HALLUCINATION_SUBSTRINGS = (
     "thank you for watching",
     "subscribe to our",
     "thanks for watching",
+    "thanks for listening",
+    "see you next time",
     "please subscribe",
     "like and subscribe",
+    "please stand by",
+    "subtitles by",
+    "transcribed by",
+    "amara.org",
     "thank you and thank others",
     "субтитри",
     "субтитры",
@@ -286,6 +292,14 @@ def is_hallucination(text: str) -> bool:
         or bool(_THANK_YOU_ONLY.match(t_lower))
         or any(p in t_lower for p in HALLUCINATION_SUBSTRINGS)
     )
+
+
+def spoken_booking_text(text: str) -> str:
+    """Keep a real appointment request. Drop silence fillers and Whisper stock phrases."""
+    cleaned = cleanup_transcript(text or "")
+    if not cleaned or is_hallucination(cleaned) or is_ignore_utterance(cleaned):
+        return ""
+    return cleaned
 
 
 def pcm_to_wav_bytes(pcm: np.ndarray, sample_rate: int = SAMPLE_RATE) -> bytes:

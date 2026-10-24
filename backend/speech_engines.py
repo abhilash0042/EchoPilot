@@ -9,8 +9,10 @@ from __future__ import annotations
 import asyncio
 import io
 import os
+import tempfile
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -206,6 +208,115 @@ def _transcribe_local_sync(pcm: np.ndarray, language: Optional[str], prompt: str
         if is_low_confidence(no_speech_prob, avg_logprob):
             return ""
     return text
+
+
+_MEDIA_MIME = {
+    "wav": "audio/wav",
+    "mp3": "audio/mpeg",
+    "mpeg": "audio/mpeg",
+    "mpga": "audio/mpeg",
+    "flac": "audio/flac",
+    "ogg": "audio/ogg",
+    "opus": "audio/ogg",
+    "aac": "audio/aac",
+    "m4a": "audio/mp4",
+    "webm": "video/webm",
+    "mp4": "video/mp4",
+    "mov": "video/quicktime",
+    "mkv": "video/x-matroska",
+    "avi": "video/x-msvideo",
+}
+
+
+def transcribe_media_bytes(data: bytes, filename: str = "speech.wav") -> str:
+    """Transcribe an uploaded audio or video file.
+
+    Same order Belfry uses: Groq whisper-large-v3 on the file bytes, then
+    local Faster-Whisper. Video containers are read for their soundtrack.
+    An empty Groq transcript is silence, not a failure.
+    """
+    if not data:
+        return ""
+    name = filename or "speech.wav"
+    key = os.getenv("GROQ_API_KEY", "").strip()
+    if key:
+        try:
+            return _transcribe_groq_file(data, name, key)
+        except Exception as exc:
+            print(f"[STT] Groq file transcription failed for {name}: {exc}")
+    if os.getenv("VERCEL"):
+        return ""
+    return _transcribe_local_file(data, name)
+
+
+def _wav_is_silence(data: bytes) -> bool:
+    """Skip a quiet WAV before Whisper, which invents phrases on silence."""
+    if not (data.startswith(b"RIFF") and len(data) > 44 and data[8:12] == b"WAVE"):
+        return False
+    offset = 12
+    pcm = b""
+    while offset + 8 <= len(data):
+        chunk = data[offset : offset + 4]
+        size = int.from_bytes(data[offset + 4 : offset + 8], "little")
+        start = offset + 8
+        if chunk == b"data":
+            pcm = data[start : start + size]
+            break
+        offset = start + size + (size % 2)
+    if len(pcm) < 2:
+        return True
+    samples = np.frombuffer(pcm[: len(pcm) - (len(pcm) % 2)], dtype=np.int16)
+    if samples.size < 1600:
+        return True
+    rms = float(np.sqrt(np.mean(np.square(samples.astype(np.float32)))))
+    return rms < 220.0
+
+
+def _transcribe_groq_file(data: bytes, filename: str, key: str) -> str:
+    from openai import OpenAI
+
+    if _wav_is_silence(data):
+        print(f"[STT] Skipped silent upload {filename}")
+        return ""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "wav"
+    mime = _MEDIA_MIME.get(ext, "application/octet-stream")
+    audio = io.BytesIO(data)
+    audio.name = filename
+    client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=key, timeout=12.0)
+    result = client.audio.transcriptions.create(
+        file=(filename, audio, mime),
+        model=STT_MODEL,
+        temperature=0,
+        language="en",
+        prompt=STT_PROMPT,
+        response_format="json",
+    )
+    return (getattr(result, "text", None) or "").strip()
+
+
+def _transcribe_local_file(data: bytes, filename: str) -> str:
+    model = get_local_whisper_model()
+    if model is None:
+        return ""
+    suffix = Path(filename).suffix or ".wav"
+    handle = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    path = handle.name
+    try:
+        handle.write(data)
+        handle.close()
+        segments, _info = model.transcribe(
+            path,
+            temperature=0,
+            vad_filter=True,
+            beam_size=5,
+            condition_on_previous_text=False,
+        )
+        return " ".join(seg.text.strip() for seg in segments if seg.text).strip()
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 async def transcribe_utterance(

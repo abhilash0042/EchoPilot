@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "fluid": true,
+  "git": {
+    "deploymentEnabled": {
+      "*": false,
+      "feat/3d-ai-avatar": true
+    }
+  },
+  "ignoreCommand": "node -e \"const ref=process.env.VERCEL_GIT_COMMIT_REF; process.exit(!ref || ref==='feat/3d-ai-avatar' ? 1 : 0)\"",
+  "functions": {
+    "app.py": {
+      "maxDuration": 300
+    }
+  }
+}

@@ -21,7 +21,7 @@
         }
     }
     </script>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=split-review-1">
 </head>
 <body>
     <div class="background-elements">
@@ -105,6 +105,14 @@
                         </div>
                     </div>
                 </div>
+
+                <button type="button" id="belfry-sdk-btn" class="belfry-sdk-btn on" aria-pressed="true">
+                    <span class="belfry-switch" aria-hidden="true"><span class="belfry-knob"></span></span>
+                    <span class="belfry-sdk-copy">
+                        <strong id="belfry-sdk-title">Belfry SDK on</strong>
+                        <span id="belfry-sdk-note">Every message is screened before Elena answers.</span>
+                    </span>
+                </button>
                 
                 <!-- Mode Switcher: Voice vs Text Chatbot -->
                 <div class="mode-switcher-container">
@@ -115,7 +123,11 @@
                         </button>
                         <button id="mode-chat-btn" class="mode-btn">
                             <i class="ph-fill ph-chat-teardrop-text"></i>
-                            <span>Concierge Messaging</span>
+                            <span>Book by Chat</span>
+                        </button>
+                        <button id="mode-review-btn" class="mode-btn">
+                            <i class="ph-fill ph-file-magnifying-glass"></i>
+                            <span>Review File or Image</span>
                         </button>
                     </div>
                 </div>
@@ -147,6 +159,15 @@
                                     </div>
                                 </div>
                             </button>
+
+                            <button type="button" class="mic-test-btn voice-audio-btn" title="Upload an audio clip to book">
+                                <i class="ph-bold ph-waveform"></i>
+                                <div class="mic-test-info">
+                                    <span>Audio</span>
+                                    <span class="upload-btn-sub">Voice recording</span>
+                                </div>
+                            </button>
+                            <input type="file" id="voice-audio-input" accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm" hidden />
                         </div>
                         
                         <p class="status-text" id="status-text">Ready to connect with Elena Vance.</p>
@@ -241,6 +262,9 @@
 
                         <!-- Prominent, Centered End Call Button -->
                         <div class="end-call-row">
+                            <button type="button" class="quick-chip voice-audio-btn" title="Send an audio clip to book on this call">
+                                <i class="ph-bold ph-waveform"></i> Audio
+                            </button>
                             <button id="end-call-btn" class="end-call-btn" title="End Call" type="button">
                                 <i class="ph-fill ph-phone-slash"></i>
                                 <span>End Call</span>
@@ -292,8 +316,55 @@
 
                         <!-- Chat Input Form -->
                         <form class="chat-input-area" id="chat-form">
-                            <input type="text" id="chat-input" placeholder="Type a message (e.g., 'Book Dr. Sarah Lin tomorrow at 10 AM')..." autocomplete="off" />
+                            <input type="file" id="chat-audio-input" accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac,.webm" hidden />
+                            <button type="button" id="chat-audio-btn" class="chat-attach-btn" title="Attach an audio recording to book" aria-label="Attach audio">
+                                <i class="ph-bold ph-waveform"></i>
+                            </button>
+                            <div class="chat-compose">
+                                <div id="chat-attachment-preview" class="chat-attachment-preview hidden"></div>
+                                <input type="text" id="chat-input" class="chat-text-input" placeholder="Type a message, or attach an audio recording to book..." autocomplete="off" />
+                            </div>
                             <button type="submit" id="chat-send-btn" class="chat-send-btn" aria-label="Send message">
+                                <i class="ph-bold ph-paper-plane-right"></i>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <div id="review-mode-section" class="hidden">
+                    <div class="glass-panel chat-interface">
+                        <div class="chat-header">
+                            <div class="agent-profile">
+                                <div class="avatar-ring elena-ring">
+                                    <div class="avatar elena-avatar">
+                                        <i class="ph-fill ph-file-magnifying-glass"></i>
+                                    </div>
+                                </div>
+                                <div class="agent-info">
+                                    <div class="pod-name-row">
+                                        <h3>File &amp; Image Review</h3>
+                                    </div>
+                                    <div class="status-row">
+                                        <span class="live-status"><span class="dot"></span> Reads the attachment. Does not book an appointment.</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chat-messages-area" id="review-messages-area"></div>
+                        <form class="chat-input-area" id="review-form">
+                            <input type="file" id="review-file-input" hidden />
+                            <input type="file" id="review-image-input" accept="image/*" hidden />
+                            <button type="button" id="review-file-btn" class="chat-attach-btn" title="Review a file" aria-label="Review file">
+                                <i class="ph-bold ph-paperclip"></i>
+                            </button>
+                            <button type="button" id="review-image-btn" class="chat-attach-btn" title="Review an image" aria-label="Review image">
+                                <i class="ph-bold ph-image"></i>
+                            </button>
+                            <div class="chat-compose">
+                                <div id="review-attachment-preview" class="chat-attachment-preview hidden"></div>
+                                <input type="text" id="review-input" class="chat-text-input" placeholder="Optional question about this file or image..." autocomplete="off" />
+                            </div>
+                            <button type="submit" id="review-send-btn" class="chat-send-btn" aria-label="Review attachment">
                                 <i class="ph-bold ph-paper-plane-right"></i>
                             </button>
                         </form>
@@ -577,6 +648,6 @@
         </div>
     </div>
 
-    <script type="module" src="app.js?v=avatar-3d-v1"></script>
+    <script type="module" src="app.js?v=belfry-reach-1"></script>
 </body>
 </html>

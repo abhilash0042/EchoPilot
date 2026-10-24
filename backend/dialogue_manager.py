@@ -2,12 +2,16 @@ import re
 
 from booking import BookingSession, BookingState
 from extraction import (
+    extract_date_fast,
+    extract_service_fast,
+    extract_time_fast,
     extract_slots,
     get_conversational_reply,
     extract_confirmation,
     add_to_history,
 )
 from booking_store import is_slot_available, save_booking
+from database import answer_catalog_question
 from datetime import datetime
 
 PROMPTS = {
@@ -69,6 +73,10 @@ def _acknowledge_and_ask(session: BookingSession, newly_filled: list[str]) -> st
         bits.append(f"for {s.name}")
     ack = ("Got it — " + ", ".join(bits) + ". ") if bits else ""
     next_prompt = PROMPTS.get(session.state, "Tell me more!")
+    if ack:
+        # The acknowledgement already opens the sentence; drop the prompt's own opener.
+        next_prompt = re.sub(r"^(?:Got it|Cool|Awesome|Perfect|Sure)[!,.]\s*", "", next_prompt)
+        next_prompt = next_prompt[:1].upper() + next_prompt[1:]
     return f"{ack}{next_prompt}".strip()
 
 
@@ -92,35 +100,77 @@ def _confirmation_reply(session: BookingSession) -> str:
     return reply
 
 
-_SECURITY_PROBE = re.compile(
-    r"\b(hack|hacking|jailbreak|exploit|malware|password|api[\s-]?key|"
-    r"secret[\s-]?key|database secret|system prompt|ignore (?:all |your )?previous)\b",
-    re.IGNORECASE,
+_WEAK_UTTERANCE = re.compile(r"^(?:hmm+|uh+|um+|maybe|wait)(?:\s+\w+){0,1}[.!?]*$", re.I)
+
+_GREETING = re.compile(
+    r"^(?:h+e+y+|h+i+|h+e+l+o+|hai+|hii+|namaste|namaskaram|good\s+(?:morning|afternoon|evening)|"
+    r"yo|sup)\b[\s,!.\w]{0,24}$",
+    re.I,
+)
+_THANKS = re.compile(r"^(?:thanks?|thank\s+you|thx|ty|tq|cheers)\b[\s,!.\w]{0,24}$", re.I)
+_BYE = re.compile(r"^(?:bye|goodbye|see\s+you|that'?s\s+all|nothing\s+else|no\s+thanks?)\b[\s,!.\w]{0,24}$", re.I)
+_CAPABILITY = re.compile(
+    r"\b(?:what\s+(?:can|do)\s+(?:you|u)\s+do|how\s+can\s+you\s+help|wt\s+can\s+u\s+do|"
+    r"what\s+do\s+you\s+offer|what\s+services)\b",
+    re.I,
+)
+_START_OVER = re.compile(r"\b(?:start\s+over|start\s+again|restart|cancel\s+(?:this|that|it)|never\s*mind)\b", re.I)
+
+_CAPABILITY_REPLY = (
+    "I can book check-ups and specialist visits, tell you service prices, doctors and "
+    "clinic hours, and take down your details. What would you like to do?"
 )
 
-_WEAK_UTTERANCE = re.compile(r"^(?:hmm+|uh+|um+|maybe|wait|hello|hi|hey)(?:\s+\w+){0,1}[.!?]*$", re.I)
 
-
-def _security_refusal() -> str:
-    return (
-        "I can't help with hacking or sharing secrets. "
-        "I'm the clinic receptionist — I can book appointments or answer clinic questions. "
-        "What can I help you with?"
-    )
+def _smalltalk_reply(session: BookingSession, user_text: str) -> str | None:
+    """Answer greetings, thanks, goodbyes, and 'what can you do' without a model call."""
+    text = (user_text or "").strip()
+    if not text:
+        return None
+    follow_up = PROMPTS.get(session.state)
+    if _CAPABILITY.search(text):
+        return _CAPABILITY_REPLY
+    if _GREETING.match(text):
+        if session.state in (BookingState.GREETING, BookingState.COLLECT_SERVICE):
+            return "Hi there! I'm Elena from Meridian Health. I can book an appointment or answer questions about our services. How can I help?"
+        return f"Hi! I'm still here. {follow_up}" if follow_up else "Hi! How can I help?"
+    if _THANKS.match(text):
+        return "You're very welcome! Is there anything else I can help you with?"
+    if _BYE.match(text):
+        return "Take care, and have a lovely day! Reach out any time you need an appointment."
+    return None
 
 
 def handle_turn(session: BookingSession, user_text: str) -> str:
     """Given the current session and what the user just said, advance the
-    state machine and return the assistant's next spoken reply."""
+    state machine and return the assistant's next spoken reply.
+
+    Safety blocks come from the Belfry gateway on the model call, not from
+    a local keyword refusal.
+    """
 
     if session.state == BookingState.GREETING:
         session.advance()
 
-    if _SECURITY_PROBE.search(user_text or ""):
-        reply = _security_refusal()
+    if _START_OVER.search(user_text or "") and session.state != BookingState.COLLECT_SERVICE:
+        session.state = BookingState.COLLECT_SERVICE
+        session.slots = type(session.slots)()
+        reply = "No problem, let's start fresh. What kind of appointment are you looking for?"
         _remember(session, "user", user_text)
         _remember(session, "assistant", reply)
         return reply
+
+    # Pure small talk ("thank you", "bye") must not be read as a name or service.
+    # Anything that also carries a service, date, or time still goes to slot filling.
+    carries_booking_info = bool(
+        extract_service_fast(user_text) or extract_date_fast(user_text) or extract_time_fast(user_text)
+    )
+    if not carries_booking_info:
+        early = _smalltalk_reply(session, user_text)
+        if early:
+            _remember(session, "user", user_text)
+            _remember(session, "assistant", early)
+            return early
 
     remaining = _remaining_fields(session)
     newly_filled: list[str] = []
@@ -153,10 +203,15 @@ def handle_turn(session: BookingSession, user_text: str) -> str:
         return reply
 
     prompt = PROMPTS.get(session.state, "Could you say that again?")
-    if _WEAK_UTTERANCE.match((user_text or "").strip()):
+    smalltalk = _smalltalk_reply(session, user_text)
+    if smalltalk:
+        reply = smalltalk
+    elif _WEAK_UTTERANCE.match((user_text or "").strip()):
         reply = prompt
     else:
-        reply = get_conversational_reply(user_text, prompt, history=_history(session)) or prompt
+        reply = answer_catalog_question(user_text) or get_conversational_reply(
+            user_text, prompt, history=_history(session)
+        ) or prompt
     _remember(session, "user", user_text)
     _remember(session, "assistant", reply)
     return reply

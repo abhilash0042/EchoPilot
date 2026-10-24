@@ -3,23 +3,38 @@ import asyncio
 import numpy as np
 import os
 import site
+import sys
 import json
 from typing import Optional, List, Dict
 from pydantic import BaseModel
 from pathlib import Path
 from dotenv import load_dotenv
 
-_env_path = Path(__file__).resolve().parent / ".env"
-load_dotenv(dotenv_path=_env_path)
-load_dotenv()
+# Vercel loads this module from the repo root. Local imports expect backend/ on the path.
+_BACKEND_DIR = Path(__file__).resolve().parent
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+_env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=_env_path, override=True)
+load_dotenv(override=True)
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 
 
 from dialogue_manager import handle_turn, handle_confirmation, PROMPTS
+from attachments import AttachmentTooLarge, build_user_message, extract_upload
+from belfry_client import (
+    BELFRY_PROJECT_ID,
+    BELFRY_TENANT_ID,
+    belfry_requested,
+    screen_inbound,
+    screen_outbound,
+    sdk_connected,
+)
 from booking import BookingSession, BookingState
 from tts import synthesize, warm_cache, split_spoken_sentences
 from extraction import add_to_history, clean_spoken_text
@@ -32,12 +47,12 @@ from stt import (
     is_repeat_transcript,
     pick_stt_language,
     prepare_utterance,
+    spoken_booking_text,
     webrtc_speech_in_tail,
 )
 from speech_engines import list_stt_engines, transcribe_utterance
 import database
 from seed_data import seed_database
-from belfry_client import belfry_check_input, belfry_check_output
 
 # --- Windows GPU DLL Fix ---
 # Dynamically add pip-installed NVIDIA libraries to the Windows DLL search path
@@ -60,11 +75,31 @@ app = FastAPI(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "stt_engines": list_stt_engines()}
+    from urllib.parse import urlparse
+    import belfry_client
+    host = urlparse(belfry_client.BELFRY_BASE_URL).hostname or ""
+    return {
+        "status": "healthy",
+        "stt_engines": list_stt_engines(),
+        "belfry": {
+            "sdk_connected": sdk_connected(),
+            "host": host,
+            "project_id": BELFRY_PROJECT_ID,
+            "tenant_id": BELFRY_TENANT_ID,
+        },
+    }
 
 @app.get("/api/telemetry")
 async def telemetry_check():
     return {"status": "ok"}
+
+def _warm_image_reader() -> None:
+    try:
+        from image_ocr import warm
+        warm()
+    except Exception as exc:
+        print(f"[Server] Image reader warmup skipped: {exc}")
+
 
 # Auto-initialize database and sample data on startup
 @app.on_event("startup")
@@ -89,7 +124,13 @@ async def on_startup():
         "I didn't quite catch that — could you say that again?",
         "I apologize, but I cannot process that request. How else may I assist you?",
     ]
-    await warm_cache(static_tts_phrases)
+    # Pre-warming talks to the TTS service. On Vercel that must not block the
+    # first request, or the function startup hits the platform time limit.
+    if os.getenv("VERCEL"):
+        asyncio.create_task(warm_cache(static_tts_phrases))
+        asyncio.create_task(asyncio.to_thread(_warm_image_reader))
+    else:
+        await warm_cache(static_tts_phrases)
 
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -106,7 +147,7 @@ if _allowed_origins_env:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|^https://[\w.-]+\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
@@ -305,6 +346,7 @@ async def audio_socket(websocket: WebSocket):
     await websocket.accept()
     session = AudioSession()
     session.allow_calibration = False
+    session.belfry_enabled = belfry_requested(websocket.query_params.get("belfry"))
     booking_session = BookingSession()
     
     session_id = f"sess_voice_{int(time.time()*1000)}"
@@ -332,21 +374,27 @@ async def audio_socket(websocket: WebSocket):
             await websocket.send_json({"type": "transcript", "text": text, "final": True, "speaker": "user"})
             await websocket.send_json({"type": "status", "message": "thinking"})
 
-            try:
-                in_res = await asyncio.wait_for(belfry_check_input(text), timeout=20.0)
-                if in_res.get("action") == "block":
-                    refusal = "I apologize, but I cannot process that request. How else may I assist you?"
-                    transcript_history.append(f"Assistant: {refusal}")
-                    await speak(websocket, session, refusal)
-                    return
-            except Exception:
-                pass
+            allowed, screened, belfry_action = await screen_inbound(
+                text, enabled=session.belfry_enabled
+            )
+            await websocket.send_json({
+                "type": "belfry",
+                "enabled": session.belfry_enabled,
+                "action": belfry_action,
+            })
+            if not allowed:
+                transcript_history.append(f"Assistant: {screened}")
+                await speak(websocket, session, screened)
+                return
 
             t0 = time.time()
             if booking_session.state == BookingState.CONFIRM:
-                reply_text = handle_confirmation(booking_session, text)
+                reply_text = handle_confirmation(booking_session, screened)
             else:
-                reply_text = handle_turn(booking_session, text)
+                reply_text = handle_turn(booking_session, screened)
+            reply_text, _outbound_action = await screen_outbound(
+                reply_text, enabled=session.belfry_enabled
+            )
 
             if not reply_text or not str(reply_text).strip():
                 current_st = booking_session.state
@@ -354,13 +402,6 @@ async def audio_socket(websocket: WebSocket):
 
             llm_ms = int((time.time() - t0) * 1000)
             print(f"[LLM Result ({llm_ms}ms)] '{reply_text}'")
-
-            try:
-                out_res = await asyncio.wait_for(belfry_check_output(reply_text), timeout=20.0)
-                if out_res.get("action") == "block":
-                    reply_text = "I apologize, but I cannot share that information. Let's proceed with your appointment."
-            except Exception:
-                pass
 
             transcript_history.append(f"Assistant: {reply_text}")
             tts_t0 = time.time()
@@ -494,6 +535,13 @@ async def audio_socket(websocket: WebSocket):
                         # Ignore client-side energy barge-in — speaker echo was cutting Elena
                         # and then transcribing her own voice as the patient.
                         pass
+                    elif data.get("type") == "belfry":
+                        session.belfry_enabled = belfry_requested(data.get("enabled"))
+                        await websocket.send_json({
+                            "type": "belfry",
+                            "enabled": session.belfry_enabled,
+                            "action": "off" if not session.belfry_enabled else "ready",
+                        })
                     elif data.get("type") == "user_text":
                         typed = str(data.get("text") or "").strip()
                         if typed and not session.turn_in_flight:
@@ -672,6 +720,7 @@ async def api_db_quick_book(req: QuickBookingRequest):
 class ChatMessageRequest(BaseModel):
     session_id: str
     message: str
+    belfry_enabled: bool = True
 
 class ChatResetRequest(BaseModel):
     session_id: str
@@ -693,12 +742,9 @@ def get_state_quick_replies(state: BookingState) -> List[str]:
     }
     return suggestions.get(state, [])
 
-@app.post("/api/chat/message")
-async def api_chat_message(req: ChatMessageRequest):
-    """Handles text message turns for the interactive Chatbot mode."""
-    session_id = req.session_id.strip() if req.session_id else "default_chat_session"
-    user_text = req.message.strip()
-
+async def _chat_turn_response(session_id: str, user_text: str, *, belfry_enabled: bool = True) -> dict:
+    """Run one concierge turn and return the chat payload."""
+    session_id = session_id.strip() if session_id else "default_chat_session"
     if session_id not in chat_sessions:
         chat_sessions[session_id] = BookingSession()
 
@@ -716,14 +762,17 @@ async def api_chat_message(req: ChatMessageRequest):
                 "phone": session.slots.phone,
             },
             "quick_replies": get_state_quick_replies(session.state),
-            "is_booked": False
+            "is_booked": False,
+            "belfry_enabled": belfry_enabled,
+            "belfry_action": "off" if not belfry_enabled else "allow",
         }
 
-    # Check user input BEFORE sending to LLM (via Belfry SDK)
-    in_res = await belfry_check_input(user_text)
-    if in_res.get("action") == "block":
+    # Every patient message is checked by Belfry before the model sees it,
+    # unless the showcase toggle is off.
+    allowed, screened, belfry_action = await screen_inbound(user_text, enabled=belfry_enabled)
+    if not allowed:
         return {
-            "reply": "I apologize, but I cannot process that request. How else can I assist with your appointment?",
+            "reply": screened,
             "state": session.state.value,
             "slots": {
                 "service": session.slots.service,
@@ -733,19 +782,18 @@ async def api_chat_message(req: ChatMessageRequest):
                 "phone": session.slots.phone,
             },
             "quick_replies": get_state_quick_replies(session.state),
-            "is_booked": False
+            "is_booked": False,
+            "belfry_enabled": belfry_enabled,
+            "belfry_action": belfry_action,
         }
 
-    # Execute dialogue turn
     if session.state == BookingState.CONFIRM:
-        reply_text = handle_confirmation(session, user_text)
+        reply_text = handle_confirmation(session, screened)
     else:
-        reply_text = handle_turn(session, user_text)
-
-    # Check LLM output BEFORE returning to user (via Belfry SDK)
-    out_res = await belfry_check_output(reply_text)
-    if out_res.get("action") == "block":
-        reply_text = "I apologize, but I cannot share that information. How else can I help you?"
+        reply_text = handle_turn(session, screened)
+    reply_text, outbound_action = await screen_outbound(reply_text, enabled=belfry_enabled)
+    if belfry_action in {"allow", "warn"} and outbound_action not in {"allow", "warn", "off"}:
+        belfry_action = outbound_action
 
     is_booked = (session.state == BookingState.BOOKED)
 
@@ -762,8 +810,228 @@ async def api_chat_message(req: ChatMessageRequest):
         "state": session.state.value,
         "slots": slots_dict,
         "quick_replies": get_state_quick_replies(session.state),
-        "is_booked": is_booked
+        "is_booked": is_booked,
+        "belfry_enabled": belfry_enabled,
+        "belfry_action": belfry_action,
     }
+
+
+@app.post("/api/chat/message")
+async def api_chat_message(req: ChatMessageRequest):
+    """Handles text message turns for the interactive Chatbot mode."""
+    session_id = req.session_id.strip() if req.session_id else "default_chat_session"
+    return await _chat_turn_response(
+        session_id,
+        req.message.strip(),
+        belfry_enabled=belfry_requested(req.belfry_enabled),
+    )
+
+
+async def _read_upload(file: UploadFile) -> tuple[str, bytes]:
+    data = await file.read(15 * 1024 * 1024 + 1)
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File is larger than 15 MB.")
+    return file.filename or "upload", data
+
+
+def _attachment_message(filename: str, data: bytes, caption: str, kind: str) -> tuple[str, dict]:
+    extracted = _read_extracted(filename, data, kind)
+    return build_user_message(caption, extracted), _attachment_meta(extracted)
+
+
+def _read_extracted(filename: str, data: bytes, kind: str):
+    try:
+        return extract_upload(
+            filename,
+            data,
+            force_image=(kind == "image"),
+            force_audio=(kind == "audio"),
+        )
+    except AttachmentTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+
+
+def _attachment_meta(extracted) -> dict:
+    return {
+        "filename": extracted.filename,
+        "kind": extracted.kind,
+        "warning": extracted.warning,
+    }
+
+
+_REVIEW_SYSTEM = (
+    "You review clinic files and images. Explain what the attachment actually says. "
+    "Mention names, dates, times, phone numbers, departments, and requests only when "
+    "they appear in the extracted text. If a question is included, answer it from that text. "
+    "Do not book an appointment, do not ask for a name or phone number, and do not invent details. "
+    "Use at most 130 words."
+)
+
+
+def _review_with_model(filename: str, kind: str, text: str, question: str) -> str:
+    from extraction import MODEL_NAME, client as llm_client
+
+    question = (question or "").strip()
+    user = f"Attachment type: {kind}\nFilename: {filename}\n"
+    if question:
+        user += f"Question: {question}\n"
+    user += f"\nExtracted text:\n{text[:6000]}"
+    result = llm_client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": _REVIEW_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+        max_tokens=320,
+        temperature=0.2,
+    )
+    return (result.choices[0].message.content or "").strip()
+
+
+def _plain_review(filename: str, text: str) -> str:
+    clipped = text.strip()[:900]
+    return f"Here's what I could read from {filename}:\n{clipped}"
+
+
+async def _review_payload(
+    filename: str,
+    data: bytes,
+    question: str,
+    kind: str,
+    *,
+    belfry_enabled: bool,
+) -> dict:
+    """Read a file or image and explain it. This does not touch a booking."""
+    extracted = await asyncio.to_thread(_read_extracted, filename, data, kind)
+    attachment = _attachment_meta(extracted)
+    source = extracted.text.strip()
+    if not source:
+        return {
+            "reply": extracted.warning or f"I couldn't read any text from {extracted.filename}.",
+            "purpose": "review",
+            "attachment": attachment,
+            "belfry_enabled": belfry_enabled,
+            "belfry_action": "off" if not belfry_enabled else "allow",
+        }
+
+    screened_input = f"{question.strip()}\n{source}" if question.strip() else source
+    allowed, screened, belfry_action = await screen_inbound(screened_input, enabled=belfry_enabled)
+    if not allowed:
+        return {
+            "reply": screened,
+            "purpose": "review",
+            "attachment": attachment,
+            "belfry_enabled": belfry_enabled,
+            "belfry_action": belfry_action,
+        }
+
+    try:
+        reply = await asyncio.to_thread(
+            _review_with_model,
+            extracted.filename,
+            extracted.kind,
+            source,
+            question,
+        )
+    except Exception as exc:
+        print(f"[Review] Model summary failed for {extracted.filename}: {exc}")
+        reply = _plain_review(extracted.filename, source)
+    if not reply:
+        reply = _plain_review(extracted.filename, source)
+    reply = reply.replace("**", "").replace("`", "")
+    reply, outbound_action = await screen_outbound(reply, enabled=belfry_enabled)
+    if belfry_action in {"allow", "warn"} and outbound_action not in {"allow", "warn", "off"}:
+        belfry_action = outbound_action
+    return {
+        "reply": reply,
+        "purpose": "review",
+        "attachment": attachment,
+        "belfry_enabled": belfry_enabled,
+        "belfry_action": belfry_action,
+    }
+
+
+@app.post("/api/review/upload")
+async def api_review_upload(
+    message: str = Form(""),
+    kind: str = Form("file"),
+    belfry_enabled: str = Form("true"),
+    file: UploadFile = File(...),
+):
+    """Explain a file or image. Booking stays on text and audio."""
+    filename, data = await _read_upload(file)
+    return await _review_payload(
+        filename,
+        data,
+        message,
+        kind,
+        belfry_enabled=belfry_requested(belfry_enabled),
+    )
+
+
+def _unclear_audio_response(session_id: str, enabled: bool, attachment: dict) -> dict:
+    """A silent or invented transcript must not open or change a booking."""
+    session = chat_sessions.get(session_id)
+    state = session.state if session else BookingState.GREETING
+    slots = session.slots if session else None
+    return {
+        "reply": (
+            "I didn't catch a clear appointment request in that recording. "
+            "Please say the service, day, and time again."
+        ),
+        "purpose": "booking",
+        "state": state.value,
+        "slots": {
+            "service": getattr(slots, "service", None),
+            "date": getattr(slots, "date", None),
+            "time": getattr(slots, "time", None),
+            "name": getattr(slots, "name", None),
+            "phone": getattr(slots, "phone", None),
+        },
+        "quick_replies": get_state_quick_replies(state),
+        "is_booked": False,
+        "belfry_enabled": enabled,
+        "belfry_action": "off" if not enabled else "allow",
+        "attachment": attachment,
+    }
+
+
+@app.post("/api/chat/upload")
+async def api_chat_upload(
+    session_id: str = Form("default_chat_session"),
+    message: str = Form(""),
+    kind: str = Form("file"),
+    belfry_enabled: str = Form("true"),
+    file: UploadFile = File(...),
+):
+    """Audio continues a booking. A file or image is reviewed instead."""
+    filename, data = await _read_upload(file)
+    enabled = belfry_requested(belfry_enabled)
+    if kind != "audio":
+        return await _review_payload(filename, data, message, kind, belfry_enabled=enabled)
+    user_text, attachment = await asyncio.to_thread(_attachment_message, filename, data, message, kind)
+    warning = (attachment.get("warning") or "").lower()
+    if "no speech could be transcribed" in warning:
+        typed = spoken_booking_text(message)
+        if not typed:
+            return _unclear_audio_response(session_id, enabled, attachment)
+        user_text = typed
+    payload = await _chat_turn_response(session_id, user_text, belfry_enabled=enabled)
+    payload["attachment"] = attachment
+    payload["purpose"] = "booking"
+    return payload
+
+
+@app.post("/api/attachments/extract")
+async def api_extract_attachment(
+    kind: str = Form("file"),
+    file: UploadFile = File(...),
+):
+    """Read a file or image so a live voice call can send it as a patient turn."""
+    filename, data = await _read_upload(file)
+    user_text, attachment = await asyncio.to_thread(_attachment_message, filename, data, "", kind)
+    return {"message": user_text, "attachment": attachment}
+
 
 @app.post("/api/chat/reset")
 async def api_chat_reset(req: ChatResetRequest):

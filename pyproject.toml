@@ -1,0 +1,28 @@
+[project]
+name = "echopilot"
+version = "2.0.0"
+description = "EchoPilot medical voice concierge"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.110.0",
+  "uvicorn>=0.30.0",
+  "websockets>=12.0",
+  "numpy==1.26.4",
+  "requests>=2.31.0",
+  "openai>=1.0.0",
+  "python-dotenv==1.0.1",
+  "edge-tts>=7.3.1",
+  "httpx>=0.25.0",
+  "aiofiles>=24.0.0",
+  "tenacity>=8.0.0",
+  "pydantic>=2.0.0",
+  "python-multipart>=0.0.9",
+  "pillow>=10.0.0",
+  "pypdf>=4.0.0",
+  "rapidocr>=3.10.0",
+  "faster-whisper>=1.0.0",
+  "webrtcvad>=2.0.10",
+]
+
+[tool.vercel]
+entrypoint = "app:app"

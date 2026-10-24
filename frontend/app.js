@@ -96,8 +96,88 @@ const STATUS_MAP = {
 // Audio Configuration (standard 16kHz for STT)
 const AUDIO_SAMPLE_RATE = 16000;
 
+// Static preview servers (3000, etc.) cannot accept API POSTs. Talk to FastAPI on 8000.
+function backendOrigin() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const explicitPort = urlParams.get('backend') || urlParams.get('port');
+    let host = explicitPort ? `127.0.0.1:${explicitPort}` : (window.location.host || '127.0.0.1:8000');
+    if (/:(3000|3001|5500|5173)$/.test(host)) {
+        host = host.replace(/:\d+$/, ':8000');
+    }
+    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+    return `${protocol}//${host}`;
+}
+
+function apiUrl(path) {
+    return `${backendOrigin()}${path}`;
+}
+
 callBtn.addEventListener('click', startCall);
 endCallBtn.addEventListener('click', endCall);
+
+const BELFRY_STORAGE_KEY = "echopilot-belfry";
+let pendingBelfryAction = "";
+
+function belfryEnabled() {
+    return localStorage.getItem(BELFRY_STORAGE_KEY) !== "0";
+}
+
+function belfryCaptionHtml(action) {
+    if (!action || action === "ready") return "";
+    const blocked = action === "block";
+    const off = action === "off";
+    const unavailable = action === "error" || action === "unavailable";
+    const label = blocked
+        ? "Blocked by Belfry SDK"
+        : unavailable
+            ? "Belfry SDK unreachable"
+            : off
+                ? "Answered with Belfry SDK off"
+                : "Checked by Belfry SDK";
+    const tone = blocked ? "blocked" : unavailable ? "off" : off ? "off" : "";
+    return `<div class="belfry-caption ${tone}">${label}</div>`;
+}
+
+function noteBelfryDecision(action) {
+    pendingBelfryAction = action || "";
+}
+
+function takeBelfryCaption() {
+    const html = belfryCaptionHtml(pendingBelfryAction);
+    pendingBelfryAction = "";
+    return html;
+}
+
+function paintBelfryToggle() {
+    const button = document.getElementById("belfry-sdk-btn");
+    const title = document.getElementById("belfry-sdk-title");
+    const note = document.getElementById("belfry-sdk-note");
+    if (!button) return;
+    const on = belfryEnabled();
+    button.classList.toggle("on", on);
+    button.classList.toggle("off", !on);
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+    if (title) title.textContent = on ? "Belfry SDK on" : "Belfry SDK off";
+    if (note) {
+        note.textContent = on
+            ? "Every message is screened before Elena answers."
+            : "Messages go straight to Elena. Use this to show the unprotected path.";
+    }
+}
+
+function setBelfryEnabled(on) {
+    localStorage.setItem(BELFRY_STORAGE_KEY, on ? "1" : "0");
+    paintBelfryToggle();
+    if (isConnected && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "belfry", enabled: on }));
+    }
+}
+
+const belfrySdkBtn = document.getElementById("belfry-sdk-btn");
+if (belfrySdkBtn) {
+    belfrySdkBtn.addEventListener("click", () => setBelfryEnabled(!belfryEnabled()));
+}
+paintBelfryToggle();
 
 async function startCall() {
     try {
@@ -116,13 +196,8 @@ async function startCall() {
         
         // 2. Setup WebSocket Connection
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const urlParams = new URLSearchParams(window.location.search);
-        const explicitPort = urlParams.get('backend') || urlParams.get('port');
-        let wsHost = explicitPort ? `127.0.0.1:${explicitPort}` : (window.location.host || '127.0.0.1:8000');
-        if (wsHost.includes(':3000') || wsHost.includes(':3001') || wsHost.includes(':5500') || wsHost.includes(':5173')) {
-            wsHost = wsHost.replace(/:\d+$/, ':8000');
-        }
-        ws = new WebSocket(`${wsProtocol}//${wsHost}/ws/audio`);
+        const wsHost = backendOrigin().replace(/^https?:\/\//, '');
+        ws = new WebSocket(`${wsProtocol}//${wsHost}/ws/audio?belfry=${belfryEnabled() ? "1" : "0"}`);
         
         ws.onopen = async () => {
             isConnected = true;
@@ -159,6 +234,11 @@ async function startCall() {
             if (typeof event.data === "string") {
                 const data = JSON.parse(event.data);
                 
+                if (data.type === "belfry") {
+                    noteBelfryDecision(data.action, data.enabled);
+                    return;
+                }
+
                 if (data.type === "status") {
                     statusText.textContent = STATUS_MAP[data.message] || data.message;
                     assistantSpeaking = (data.message === "speaking");
@@ -549,6 +629,7 @@ function appendTranscriptLine(speaker, text) {
     }
     // Handle both raw codes ("assistant", "user") and any labels
     const isAssistant = speaker === "assistant" || speaker === "Elena Assistant" || speaker === "Elena";
+    const caption = isAssistant ? takeBelfryCaption() : "";
     
     const bubble = document.createElement("div");
     bubble.className = `chat-bubble ${isAssistant ? 'bubble-assistant' : 'bubble-user'}`;
@@ -562,7 +643,7 @@ function appendTranscriptLine(speaker, text) {
             </div>
             <span class="bubble-time">${timeStr}</span>
         </div>
-        <div class="bubble-content">${escapeHtml(text)}</div>
+        <div class="bubble-content">${escapeHtml(text)}${caption}</div>
     `;
     
     transcriptArea.appendChild(bubble);
@@ -723,7 +804,7 @@ if (reseedDbBtn) {
         reseedDbBtn.innerHTML = `<i class="ph-bold ph-spinner"></i> Resetting...`;
         
         try {
-            const res = await fetch('/api/database/seed', { method: 'POST' });
+            const res = await fetch(apiUrl('/api/database/seed'), { method: 'POST' });
             const data = await res.json();
             alert("Database re-seeded successfully with clean sample records!");
             loadDatabaseData();
@@ -741,7 +822,7 @@ if (reseedDbBtn) {
 async function loadDatabaseData() {
     try {
         // 1. Overview & Stats
-        fetch('/api/database/overview')
+        fetch(apiUrl('/api/database/overview'))
             .then(res => res.json())
             .then(data => {
                 if (data.counts) {
@@ -754,31 +835,31 @@ async function loadDatabaseData() {
             .catch(console.error);
 
         // 2. Patients & Sensitive Records
-        fetch('/api/database/patients')
+        fetch(apiUrl('/api/database/patients'))
             .then(res => res.json())
             .then(data => renderPatientsTable(data.patients || []))
             .catch(console.error);
 
         // 3. Appointments
-        fetch('/api/database/appointments')
+        fetch(apiUrl('/api/database/appointments'))
             .then(res => res.json())
             .then(data => renderAppointmentsTable(data.appointments || []))
             .catch(console.error);
 
         // 4. Doctors
-        fetch('/api/database/doctors')
+        fetch(apiUrl('/api/database/doctors'))
             .then(res => res.json())
             .then(data => renderDoctorsTable(data.doctors || []))
             .catch(console.error);
 
         // 5. Hospital Info
-        fetch('/api/database/hospitals')
+        fetch(apiUrl('/api/database/hospitals'))
             .then(res => res.json())
             .then(data => renderHospitalInfo(data.hospitals || []))
             .catch(console.error);
 
         // 6. Call Logs
-        fetch('/api/database/call-logs')
+        fetch(apiUrl('/api/database/call-logs'))
             .then(res => res.json())
             .then(data => renderCallLogsTable(data.call_logs || []))
             .catch(console.error);
@@ -984,34 +1065,26 @@ function escapeHtml(str) {
 
 const modeVoiceBtn = document.getElementById('mode-voice-btn');
 const modeChatBtn = document.getElementById('mode-chat-btn');
+const modeReviewBtn = document.getElementById('mode-review-btn');
 const voiceModeSection = document.getElementById('voice-mode-section');
 const chatModeSection = document.getElementById('chat-mode-section');
+const reviewModeSection = document.getElementById('review-mode-section');
 
-if (modeVoiceBtn && modeChatBtn) {
-    modeVoiceBtn.addEventListener('click', () => {
-        modeVoiceBtn.classList.add('active');
-        modeChatBtn.classList.remove('active');
-        voiceModeSection.classList.remove('hidden');
-        chatModeSection.classList.add('hidden');
-    });
-
-    modeChatBtn.addEventListener('click', () => {
-        modeChatBtn.classList.add('active');
-        modeVoiceBtn.classList.remove('active');
-        chatModeSection.classList.remove('hidden');
-        voiceModeSection.classList.add('hidden');
-        
-        // If voice call is active, end it
-        if (isConnected) {
-            endCall();
-        }
-        
-        // Initialize chat if empty
-        if (chatMessagesArea && chatMessagesArea.children.length === 0) {
-            initChatbot();
-        }
-    });
+function setMode(mode) {
+    if (modeVoiceBtn) modeVoiceBtn.classList.toggle('active', mode === 'voice');
+    if (modeChatBtn) modeChatBtn.classList.toggle('active', mode === 'chat');
+    if (modeReviewBtn) modeReviewBtn.classList.toggle('active', mode === 'review');
+    if (voiceModeSection) voiceModeSection.classList.toggle('hidden', mode !== 'voice');
+    if (chatModeSection) chatModeSection.classList.toggle('hidden', mode !== 'chat');
+    if (reviewModeSection) reviewModeSection.classList.toggle('hidden', mode !== 'review');
+    if (mode !== 'voice' && isConnected) endCall();
+    if (mode === 'chat' && chatMessagesArea && chatMessagesArea.children.length === 0) initChatbot();
+    if (mode === 'review' && reviewMessagesArea && reviewMessagesArea.children.length === 0) initReview();
 }
+
+if (modeVoiceBtn) modeVoiceBtn.addEventListener('click', () => setMode('voice'));
+if (modeChatBtn) modeChatBtn.addEventListener('click', () => setMode('chat'));
+if (modeReviewBtn) modeReviewBtn.addEventListener('click', () => setMode('review'));
 
 // ==========================================
 // INTERACTIVE TEXT CHATBOT LOGIC
@@ -1022,9 +1095,28 @@ const chatSuggestionsArea = document.getElementById('chat-suggestions-area');
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 const resetChatBtn = document.getElementById('reset-chat-btn');
+const chatAudioBtn = document.getElementById('chat-audio-btn');
+const chatAudioInput = document.getElementById('chat-audio-input');
+const chatAttachmentPreview = document.getElementById('chat-attachment-preview');
+const voiceAudioInput = document.getElementById('voice-audio-input');
+const reviewMessagesArea = document.getElementById('review-messages-area');
+const reviewForm = document.getElementById('review-form');
+const reviewInput = document.getElementById('review-input');
+const reviewFileBtn = document.getElementById('review-file-btn');
+const reviewImageBtn = document.getElementById('review-image-btn');
+const reviewFileInput = document.getElementById('review-file-input');
+const reviewImageInput = document.getElementById('review-image-input');
+const reviewAttachmentPreview = document.getElementById('review-attachment-preview');
+
+const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 
 let chatSessionId = `chat_sess_${Date.now()}`;
 let chatThinkingEl = null;
+let pendingAttachment = null;
+let pendingReview = null;
+let chatSendInFlight = false;
+let reviewSendInFlight = false;
+let reviewThinkingEl = null;
 
 // Initialize Chatbot with Greeting
 async function initChatbot() {
@@ -1041,63 +1133,369 @@ async function initChatbot() {
     ]);
 }
 
+function openChatMode() {
+    setMode('chat');
+}
+
+function formatBytes(size) {
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function clearPendingAttachment() {
+    if (pendingAttachment && pendingAttachment.previewUrl) {
+        URL.revokeObjectURL(pendingAttachment.previewUrl);
+    }
+    pendingAttachment = null;
+    if (chatAttachmentPreview) {
+        chatAttachmentPreview.innerHTML = "";
+        chatAttachmentPreview.classList.add("hidden");
+    }
+}
+
+function stageAttachment(file, kind) {
+    if (!file) return;
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+        openChatMode();
+        appendChatBubble('assistant', "That file is larger than 15 MB. Send a smaller file or a zip of the pages you need.");
+        return;
+    }
+    openChatMode();
+    clearPendingAttachment();
+    const previewUrl = kind === "image" ? URL.createObjectURL(file) : "";
+    pendingAttachment = { file, kind, previewUrl };
+    if (!chatAttachmentPreview) return;
+    chatAttachmentPreview.classList.remove("hidden");
+    const icon = kind === "audio" ? "ph-waveform" : kind === "image" ? "ph-image" : "ph-file";
+    const thumb = previewUrl
+        ? `<img src="${previewUrl}" alt="" />`
+        : `<i class="ph-bold ${icon}"></i>`;
+    chatAttachmentPreview.innerHTML = `
+        ${thumb}
+        <span class="chat-attachment-name">${escapeHtml(file.name)} · ${formatBytes(file.size)}</span>
+        <button type="button" class="chat-attachment-remove" aria-label="Remove attachment">&times;</button>
+    `;
+    const removeBtn = chatAttachmentPreview.querySelector(".chat-attachment-remove");
+    if (removeBtn) {
+        removeBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            clearPendingAttachment();
+        });
+    }
+}
+
+function applyChatReply(data) {
+    if (data && data.belfry_action) noteBelfryDecision(data.belfry_action);
+    removeChatThinking();
+    if (data.reply) {
+        appendChatBubble('assistant', data.reply);
+    } else if (data.detail) {
+        appendChatBubble('assistant', typeof data.detail === "string" ? data.detail : "I couldn't read that attachment.");
+    }
+    if (data.quick_replies && data.quick_replies.length > 0) {
+        renderChatSuggestions(data.quick_replies);
+    }
+    if (data.is_booked) {
+        fetch(apiUrl('/api/database/overview'))
+            .then(r => r.json())
+            .then(ov => {
+                if (ov.counts) {
+                    document.getElementById('stat-patients').textContent = ov.counts.patients ?? 0;
+                    document.getElementById('stat-appointments').textContent = ov.counts.appointments ?? 0;
+                }
+            })
+            .catch(console.error);
+    }
+}
+
+function thinkingLabel(kind) {
+    if (kind === "image") return "Reading the image…";
+    if (kind === "audio") return "Transcribing the audio…";
+    return "";
+}
+
+async function sendChatMessage(text, attachment) {
+    if (chatSendInFlight) return;
+    chatSendInFlight = true;
+    const sendBtn = document.getElementById('chat-send-btn');
+    if (sendBtn) sendBtn.disabled = true;
+    chatSuggestionsArea.innerHTML = "";
+    showChatThinking(attachment ? thinkingLabel(attachment.kind) : "");
+    try {
+        let res;
+        if (attachment) {
+            const body = new FormData();
+            body.append("session_id", chatSessionId);
+            body.append("message", text);
+            body.append("kind", attachment.kind);
+            body.append("file", attachment.file, attachment.file.name);
+            body.append("belfry_enabled", belfryEnabled() ? "true" : "false");
+            res = await fetch(apiUrl('/api/chat/upload'), {
+                method: 'POST',
+                body,
+                signal: AbortSignal.timeout(20000),
+            });
+        } else {
+            res = await fetch(apiUrl('/api/chat/message'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                signal: AbortSignal.timeout(20000),
+                body: JSON.stringify({
+                    session_id: chatSessionId,
+                    message: text,
+                    belfry_enabled: belfryEnabled()
+                })
+            });
+        }
+        const data = await res.json();
+        if (!res.ok && !data.reply) {
+            removeChatThinking();
+            appendChatBubble('assistant', data.detail || "I couldn't read that attachment.");
+            return;
+        }
+        applyChatReply(data);
+    } catch (err) {
+        console.error("Chat error:", err);
+        removeChatThinking();
+        const timedOut = err && (err.name === "TimeoutError" || err.name === "AbortError");
+        appendChatBubble('assistant', timedOut
+            ? "That check took too long. Send it again, or turn Belfry SDK off for the faster path."
+            : "Sorry, I ran into a connection error. Please make sure the backend server is running.");
+    } finally {
+        chatSendInFlight = false;
+        if (sendBtn) sendBtn.disabled = false;
+    }
+}
+
+async function sendAttachmentOnCall(file, kind) {
+    if (!file) return;
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+        if (statusText) statusText.textContent = "File is larger than 15 MB.";
+        return;
+    }
+    if (!(isConnected && ws && ws.readyState === WebSocket.OPEN)) {
+        if (kind === "audio") stageAttachment(file, kind);
+        else stageReview(file, kind);
+        return;
+    }
+    if (kind !== "audio") {
+        stageReview(file, kind);
+        return;
+    }
+    if (statusText) {
+        statusText.textContent = kind === "image"
+            ? "Reading your image..."
+            : kind === "audio"
+                ? "Transcribing your audio..."
+                : "Reading your file...";
+    }
+    try {
+        const body = new FormData();
+        body.append("kind", kind);
+        body.append("file", file, file.name);
+        const res = await fetch(apiUrl('/api/attachments/extract'), { method: 'POST', body });
+        const data = await res.json();
+        if (!res.ok || !data.message) {
+            if (statusText) statusText.textContent = data.detail || "Couldn't read that attachment.";
+            return;
+        }
+        ws.send(JSON.stringify({ type: "user_text", text: data.message }));
+        if (statusText) statusText.textContent = "Talking to Elena...";
+    } catch (err) {
+        console.error("Attachment error:", err);
+        if (statusText) statusText.textContent = "Couldn't send that attachment.";
+    }
+}
+
+function bindFilePicker(buttons, input, kind, onFile) {
+    if (!input) return;
+    buttons.forEach((button) => {
+        if (!button) return;
+        button.addEventListener('click', () => input.click());
+    });
+    input.addEventListener('change', () => {
+        const file = input.files && input.files[0];
+        input.value = "";
+        if (file) onFile(file, kind);
+    });
+}
+
+bindFilePicker([chatAudioBtn], chatAudioInput, "audio", stageAttachment);
+
+function initReview() {
+    if (!reviewMessagesArea) return;
+    reviewMessagesArea.innerHTML = "";
+    appendReviewBubble("assistant", "Upload a file or image and I'll explain what it says. This does not book an appointment. Use voice or Book by Chat for scheduling.");
+}
+
+function clearPendingReview() {
+    if (pendingReview && pendingReview.previewUrl) {
+        URL.revokeObjectURL(pendingReview.previewUrl);
+    }
+    pendingReview = null;
+    if (reviewAttachmentPreview) {
+        reviewAttachmentPreview.innerHTML = "";
+        reviewAttachmentPreview.classList.add("hidden");
+    }
+}
+
+function stageReview(file, kind) {
+    if (!file) return;
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+        setMode("review");
+        appendReviewBubble("assistant", "That file is larger than 15 MB. Send a smaller file or image.");
+        return;
+    }
+    setMode("review");
+    clearPendingReview();
+    const previewUrl = kind === "image" ? URL.createObjectURL(file) : "";
+    pendingReview = { file, kind, previewUrl };
+    if (!reviewAttachmentPreview) return;
+    reviewAttachmentPreview.classList.remove("hidden");
+    const icon = kind === "image" ? "ph-image" : "ph-file";
+    const thumb = previewUrl
+        ? `<img src="${previewUrl}" alt="" />`
+        : `<i class="ph-bold ${icon}"></i>`;
+    reviewAttachmentPreview.innerHTML = `
+        ${thumb}
+        <span class="chat-attachment-name">${escapeHtml(file.name)} · ${formatBytes(file.size)}</span>
+        <button type="button" class="chat-attachment-remove" aria-label="Remove attachment">&times;</button>
+    `;
+    const removeBtn = reviewAttachmentPreview.querySelector(".chat-attachment-remove");
+    if (removeBtn) {
+        removeBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            clearPendingReview();
+        });
+    }
+}
+
+function appendReviewBubble(speaker, text, attachment) {
+    if (!reviewMessagesArea) return;
+    const isAssistant = speaker === "assistant";
+    const caption = isAssistant ? takeBelfryCaption() : "";
+    const bubble = document.createElement("div");
+    bubble.className = `chat-bubble ${isAssistant ? "bubble-assistant" : "bubble-user"}`;
+    const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    let attachmentHtml = "";
+    if (attachment && attachment.file) {
+        const name = escapeHtml(attachment.file.name);
+        if (attachment.previewUrl) {
+            attachmentHtml = `<div class="bubble-attachment"><img src="${attachment.previewUrl}" alt="" /><span>${name}</span></div>`;
+        } else {
+            const icon = attachment.kind === "image" ? "ph-image" : "ph-file";
+            attachmentHtml = `<div class="bubble-attachment"><i class="ph-bold ${icon}"></i><span>${name}</span></div>`;
+        }
+    }
+    bubble.innerHTML = `
+        <div class="bubble-meta">
+            <div class="bubble-sender">
+                <span class="bubble-icon"><i class="${isAssistant ? "ph-fill ph-file-magnifying-glass" : "ph-fill ph-user"}"></i></span>
+                <span class="bubble-author">${isAssistant ? "Elena • File review" : "You"}</span>
+            </div>
+            <span class="bubble-time">${timeStr}</span>
+        </div>
+        <div class="bubble-content">${attachmentHtml}${text ? escapeHtml(text) : ""}${caption}</div>
+    `;
+    reviewMessagesArea.appendChild(bubble);
+    reviewMessagesArea.scrollTop = reviewMessagesArea.scrollHeight;
+}
+
+function showReviewThinking(kind) {
+    if (reviewThinkingEl || !reviewMessagesArea) return;
+    reviewThinkingEl = document.createElement("div");
+    reviewThinkingEl.className = "chat-bubble bubble-thinking";
+    const text = kind === "image" ? "Reading the image…" : "Reading the file…";
+    reviewThinkingEl.innerHTML = `
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <span class="thinking-label">${text}</span>
+    `;
+    reviewMessagesArea.appendChild(reviewThinkingEl);
+    reviewMessagesArea.scrollTop = reviewMessagesArea.scrollHeight;
+}
+
+function removeReviewThinking() {
+    if (reviewThinkingEl && reviewThinkingEl.parentNode) {
+        reviewThinkingEl.parentNode.removeChild(reviewThinkingEl);
+    }
+    reviewThinkingEl = null;
+}
+
+async function sendReview(text, attachment) {
+    if (reviewSendInFlight) return;
+    reviewSendInFlight = true;
+    const sendBtn = document.getElementById("review-send-btn");
+    if (sendBtn) sendBtn.disabled = true;
+    showReviewThinking(attachment.kind);
+    try {
+        const body = new FormData();
+        body.append("message", text || "");
+        body.append("kind", attachment.kind);
+        body.append("file", attachment.file, attachment.file.name);
+        body.append("belfry_enabled", belfryEnabled() ? "true" : "false");
+        const res = await fetch(apiUrl("/api/review/upload"), {
+            method: "POST",
+            body,
+            signal: AbortSignal.timeout(25000),
+        });
+        const data = await res.json();
+        if (data && data.belfry_action) noteBelfryDecision(data.belfry_action);
+        removeReviewThinking();
+        appendReviewBubble("assistant", (data && (data.reply || data.detail)) || "I couldn't read that attachment.");
+    } catch (err) {
+        console.error("Review error:", err);
+        removeReviewThinking();
+        appendReviewBubble("assistant", "That review took too long. Try a smaller file or image.");
+    } finally {
+        reviewSendInFlight = false;
+        if (sendBtn) sendBtn.disabled = false;
+    }
+}
+
+if (reviewForm) {
+    reviewForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const text = reviewInput ? reviewInput.value.trim() : "";
+        if (!pendingReview) {
+            appendReviewBubble("assistant", "Attach a file or image first. Text and audio stay on the booking screens.");
+            return;
+        }
+        const attachment = pendingReview;
+        if (reviewInput) reviewInput.value = "";
+        pendingReview = null;
+        if (reviewAttachmentPreview) {
+            reviewAttachmentPreview.innerHTML = "";
+            reviewAttachmentPreview.classList.add("hidden");
+        }
+        appendReviewBubble("user", text, attachment);
+        await sendReview(text, attachment);
+    });
+}
+
+bindFilePicker(Array.from(document.querySelectorAll('.voice-audio-btn')), voiceAudioInput, "audio", sendAttachmentOnCall);
+bindFilePicker([reviewFileBtn], reviewFileInput, "file", stageReview);
+bindFilePicker([reviewImageBtn], reviewImageInput, "image", stageReview);
+
 // Handle Message Submit
 if (chatForm) {
     chatForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const text = chatInput.value.trim();
-        if (!text) return;
-        
-        // Clear input field
+        if (!text && !pendingAttachment) return;
+
+        const attachment = pendingAttachment;
         chatInput.value = "";
-        
-        // Append user bubble
-        appendChatBubble('user', text);
-        chatSuggestionsArea.innerHTML = ""; // Clear suggestions while thinking
-        
-        // Show thinking indicator
-        showChatThinking();
-        
-        try {
-            const res = await fetch('/api/chat/message', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    session_id: chatSessionId,
-                    message: text
-                })
-            });
-            
-            const data = await res.json();
-            removeChatThinking();
-            
-            if (data.reply) {
-                appendChatBubble('assistant', data.reply);
-            }
-            
-            // Render smart suggestion chips
-            if (data.quick_replies && data.quick_replies.length > 0) {
-                renderChatSuggestions(data.quick_replies);
-            }
-            
-            // If appointment was booked, notify user and refresh database summary
-            if (data.is_booked) {
-                fetch('/api/database/overview')
-                    .then(r => r.json())
-                    .then(ov => {
-                        if (ov.counts) {
-                            document.getElementById('stat-patients').textContent = ov.counts.patients ?? 0;
-                            document.getElementById('stat-appointments').textContent = ov.counts.appointments ?? 0;
-                        }
-                    })
-                    .catch(console.error);
-            }
-            
-        } catch (err) {
-            console.error("Chat error:", err);
-            removeChatThinking();
-            appendChatBubble('assistant', "Sorry, I ran into a connection error. Please make sure the backend server is running.");
+        pendingAttachment = null;
+        if (chatAttachmentPreview) {
+            chatAttachmentPreview.innerHTML = "";
+            chatAttachmentPreview.classList.add("hidden");
         }
+
+        appendChatBubble('user', text, attachment);
+        await sendChatMessage(text, attachment);
     });
 }
 
@@ -1108,7 +1506,7 @@ if (resetChatBtn) {
         chatSessionId = `chat_sess_${Date.now()}`;
         
         try {
-            await fetch('/api/chat/reset', {
+            await fetch(apiUrl('/api/chat/reset'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ session_id: chatSessionId })
@@ -1117,18 +1515,30 @@ if (resetChatBtn) {
             console.error("Reset error:", e);
         }
         
+        clearPendingAttachment();
         initChatbot();
         resetChatBtn.disabled = false;
     });
 }
 
-function appendChatBubble(speaker, text) {
+function appendChatBubble(speaker, text, attachment) {
     if (!chatMessagesArea) return;
     
     const isAssistant = speaker === 'assistant';
+    const caption = isAssistant ? takeBelfryCaption() : "";
     const bubble = document.createElement('div');
     bubble.className = `chat-bubble ${isAssistant ? 'bubble-assistant' : 'bubble-user'}`;
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    let attachmentHtml = "";
+    if (attachment && attachment.file) {
+        const name = escapeHtml(attachment.file.name);
+        if (attachment.previewUrl) {
+            attachmentHtml = `<div class="bubble-attachment"><img src="${attachment.previewUrl}" alt="" /><span>${name}</span></div>`;
+        } else {
+            const icon = attachment.kind === "audio" ? "ph-waveform" : "ph-file";
+            attachmentHtml = `<div class="bubble-attachment"><i class="ph-bold ${icon}"></i><span>${name}</span></div>`;
+        }
+    }
     
     bubble.innerHTML = `
         <div class="bubble-meta">
@@ -1138,7 +1548,7 @@ function appendChatBubble(speaker, text) {
             </div>
             <span class="bubble-time">${timeStr}</span>
         </div>
-        <div class="bubble-content">${escapeHtml(text)}</div>
+        <div class="bubble-content">${attachmentHtml}${text ? escapeHtml(text) : ""}${caption}</div>
     `;
     
     chatMessagesArea.appendChild(bubble);
@@ -1162,14 +1572,16 @@ function renderChatSuggestions(suggestions) {
     });
 }
 
-function showChatThinking() {
+function showChatThinking(label) {
     if (chatThinkingEl || !chatMessagesArea) return;
     chatThinkingEl = document.createElement('div');
     chatThinkingEl.className = "chat-bubble bubble-thinking";
+    const text = label || (belfryEnabled() ? "Checking with Belfry…" : "Elena is reading…");
     chatThinkingEl.innerHTML = `
         <div class="typing-dot"></div>
         <div class="typing-dot"></div>
         <div class="typing-dot"></div>
+        <span class="thinking-label">${text}</span>
     `;
     chatMessagesArea.appendChild(chatThinkingEl);
     chatMessagesArea.scrollTop = chatMessagesArea.scrollHeight;

@@ -74,6 +74,36 @@ class TestSpeechEngines(unittest.IsolatedAsyncioTestCase):
         self.assertIn("nemotron", status)
         self.assertIn("local", status)
 
+    def test_silent_wav_skips_whisper(self):
+        from speech_engines import _wav_is_silence, transcribe_media_bytes
+        from stt import pcm_to_wav_bytes
+
+        wav = pcm_to_wav_bytes(np.zeros(16000, dtype=np.int16))
+        self.assertTrue(_wav_is_silence(wav))
+        with patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}):
+            with patch("openai.OpenAI") as client:
+                text = transcribe_media_bytes(wav, "silence.wav")
+        self.assertEqual(text, "")
+        client.assert_not_called()
+
+    def test_file_transcription_pins_english(self):
+        from speech_engines import transcribe_media_bytes
+        from stt import pcm_to_wav_bytes
+
+        wav = pcm_to_wav_bytes((np.sin(np.linspace(0, 40, 16000)) * 8000).astype(np.int16))
+        created = MagicMock()
+        created.audio.transcriptions.create.return_value = _FakeTranscription(
+            "I need a cardiology appointment tomorrow at 10 AM"
+        )
+        with patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}):
+            with patch("openai.OpenAI", return_value=created):
+                text = transcribe_media_bytes(wav, "note.wav")
+        kwargs = created.audio.transcriptions.create.call_args.kwargs
+        self.assertEqual(kwargs["language"], "en")
+        self.assertEqual(kwargs["temperature"], 0)
+        self.assertIn("cardiology", kwargs["prompt"])
+        self.assertIn("cardiology", text)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

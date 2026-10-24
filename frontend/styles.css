@@ -615,7 +615,14 @@ body {
     background: transparent;
     padding: 0.5rem;
     display: flex;
+    align-items: center;
     gap: 6px;
+}
+
+.thinking-label {
+    margin-left: 6px;
+    color: var(--text-muted);
+    font-size: 0.82rem;
 }
 
 .typing-dot {
@@ -1042,8 +1049,89 @@ body {
     z-index: 10;
 }
 
+.belfry-sdk-btn {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 0 auto 1.25rem;
+    max-width: 520px;
+    text-align: left;
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(34, 197, 94, 0.45);
+    color: #e2e8f0;
+    border-radius: 16px;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.belfry-sdk-btn.off {
+    border-color: rgba(248, 113, 113, 0.55);
+}
+
+.belfry-sdk-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.belfry-sdk-copy strong {
+    font-size: 0.95rem;
+}
+
+.belfry-sdk-copy span {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    line-height: 1.35;
+}
+
+.belfry-switch {
+    width: 46px;
+    height: 26px;
+    border-radius: 999px;
+    background: #16a34a;
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.belfry-sdk-btn.off .belfry-switch {
+    background: #64748b;
+}
+
+.belfry-knob {
+    position: absolute;
+    top: 3px;
+    left: 23px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: white;
+    transition: left 0.2s ease;
+}
+
+.belfry-sdk-btn.off .belfry-knob {
+    left: 3px;
+}
+
+.belfry-caption {
+    display: inline-block;
+    margin-top: 0.45rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: #86efac;
+}
+
+.belfry-caption.blocked,
+.belfry-caption.off {
+    color: #fca5a5;
+}
+
 .mode-toggle {
     display: inline-flex;
+    flex-wrap: wrap;
+    justify-content: center;
     background: rgba(15, 23, 42, 0.75);
     border: 1px solid rgba(255, 255, 255, 0.1);
     padding: 5px;
@@ -1168,15 +1256,23 @@ body {
 /* Chat Input Bar */
 .chat-input-area {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: 10px;
     padding: 0.9rem 1.5rem;
     background: rgba(15, 23, 42, 0.8);
     border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.chat-input-area input {
+.chat-compose {
     flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.chat-text-input {
+    width: 100%;
     background: rgba(30, 41, 59, 0.7);
     border: 1px solid rgba(255, 255, 255, 0.12);
     color: var(--white);
@@ -1188,14 +1284,94 @@ body {
     transition: var(--transition-fast);
 }
 
-.chat-input-area input:focus {
+.chat-text-input:focus {
     border-color: var(--primary);
     box-shadow: 0 0 15px var(--primary-glow);
     background: rgba(30, 41, 59, 0.95);
 }
 
-.chat-input-area input::placeholder {
+.chat-text-input::placeholder {
     color: var(--text-muted);
+}
+
+.chat-attach-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(30, 41, 59, 0.7);
+    color: #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15rem;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: var(--transition-fast);
+}
+
+.chat-attach-btn:hover {
+    border-color: var(--primary);
+    color: #ffffff;
+    box-shadow: 0 0 12px var(--primary-glow);
+}
+
+.chat-attachment-preview {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    align-self: flex-start;
+    max-width: 100%;
+    padding: 0.35rem 0.55rem 0.35rem 0.4rem;
+    border-radius: 12px;
+    background: rgba(14, 165, 233, 0.12);
+    border: 1px solid rgba(14, 165, 233, 0.35);
+    color: #e0f2fe;
+    font-size: 0.82rem;
+}
+
+.chat-attachment-preview.hidden {
+    display: none;
+}
+
+.chat-attachment-preview img {
+    width: 36px;
+    height: 36px;
+    object-fit: cover;
+    border-radius: 8px;
+}
+
+.chat-attachment-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 280px;
+}
+
+.chat-attachment-remove {
+    border: none;
+    background: transparent;
+    color: #e0f2fe;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.2rem;
+}
+
+.bubble-attachment {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.bubble-attachment img {
+    width: 72px;
+    height: 72px;
+    object-fit: cover;
+    border-radius: 8px;
 }
 
 .chat-send-btn {
@@ -1512,6 +1688,12 @@ body {
 .mic-test-info span {
     font-size: 0.85rem;
     font-weight: 600;
+}
+
+.upload-btn-sub {
+    font-size: 0.68rem !important;
+    font-weight: 500 !important;
+    color: var(--text-muted);
 }
 
 .mic-level-meter {
@@ -2540,6 +2722,8 @@ body {
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
+    flex-wrap: wrap !important;
+    gap: 10px !important;
     width: 100% !important;
     margin: 1.25rem 0 1.5rem 0 !important;
 }

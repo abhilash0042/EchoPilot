@@ -91,6 +91,13 @@ class TestTtsSpeakable(unittest.TestCase):
         self.assertTrue(is_ignore_utterance("Cooldown"))
         self.assertFalse(is_hallucination("I need a cardiology appointment tomorrow"))
         self.assertFalse(is_hallucination("Can I book cardiology tomorrow"))
+        self.assertTrue(is_hallucination("Thanks for watching!"))
+        self.assertTrue(is_hallucination("See you next time."))
+        self.assertTrue(is_hallucination("Субтитры сделаны"))
+        from stt import spoken_booking_text
+        self.assertEqual(spoken_booking_text("Thanks for watching"), "")
+        self.assertEqual(spoken_booking_text("Thank you."), "")
+        self.assertIn("cardiology", spoken_booking_text("Please book a cardiology appointment tomorrow at 10 AM"))
 
     def test_echo_of_assistant_is_dropped(self):
         greeting = "Hey there! I'm Elena from the health clinic. What can I help you with today?"
