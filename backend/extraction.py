@@ -1,15 +1,22 @@
 import os
 import re
+import sys
 import json
 from datetime import date, timedelta
+from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
+
+# Vendored gateway SDK (belfry-gateway-sdk → gateway/python).
+_sdk_root = Path(__file__).resolve().parents[1] / "sdk"
+if _sdk_root.is_dir() and str(_sdk_root) not in sys.path:
+    sys.path.insert(0, str(_sdk_root))
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"), override=True)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 BELFRY_API_KEY = (os.getenv("BELFRY_API_KEY") or os.getenv("BELFRY_LABS_API_KEY") or "").strip()
-BELFRY_BASE_URL = os.getenv("BELFRY_BASE_URL", "http://127.0.0.1:8010/api/v1").rstrip("/")
+BELFRY_BASE_URL = os.getenv("BELFRY_BASE_URL", "https://app.belfrylabs.ai/api/v1").rstrip("/")
 BELFRY_PROJECT_ID = os.getenv("BELFRY_PROJECT_ID", "").strip()
 BELFRY_TENANT_ID = os.getenv("BELFRY_TENANT_ID", "").strip()
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").strip().lower()
@@ -104,11 +111,103 @@ class _GroqClient:
         self.chat = _GroqChat(inner.chat)
 
 
-if LLM_PROVIDER in {"groq", "grok"}:
-    client = _GroqClient(OpenAI(
+_GATEWAY_MODELS = {
+    "openai/gpt-oss-120b": "openai-gpt-oss-120b",
+    "openai/gpt-oss-20b": "openai-gpt-oss-20b",
+    "gemini-3.6-flash": "gemini-3.6-flash",
+    "gemini-3.5-flash-lite": "gemini-3.5-flash-lite",
+    "google-gemini-3.6-flash": "google-gemini-3.6-flash",
+    "google-gemini-3.5-flash-lite": "google-gemini-3.5-flash-lite",
+}
+
+
+class _GatewayChoiceMessage:
+    def __init__(self, content):
+        self.content = content or ""
+
+
+class _GatewayChoice:
+    def __init__(self, content, finish_reason):
+        self.message = _GatewayChoiceMessage(content)
+        self.finish_reason = finish_reason
+
+
+class _GatewayCompletion:
+    def __init__(self, content, finish_reason, model):
+        self.choices = [_GatewayChoice(content, finish_reason)]
+        self.model = model
+
+
+class _OfficialGatewayCompletions:
+    """OpenAI-shaped wrapper. Every call is POST {base}/gateway/v1/chat/completions."""
+
+    def __init__(self, gateway):
+        self._gateway = gateway
+
+    def create(self, *args, **kwargs):
+        from belfry_gateway.types import ChatCompletion
+
+        model = str(kwargs.get("model") or MODEL_NAME)
+        body = self._gateway.build_chat_body(
+            project_id=BELFRY_PROJECT_ID,
+            model=_GATEWAY_MODELS.get(model, model),
+            messages=kwargs.get("messages") or [],
+            temperature=kwargs.get("temperature"),
+            max_tokens=kwargs.get("max_tokens"),
+            metadata=None,
+            stream=False,
+        )
+        if BELFRY_TENANT_ID:
+            body["tenant_id"] = BELFRY_TENANT_ID
+        if kwargs.get("response_format"):
+            body["response_format"] = kwargs["response_format"]
+        url = f"{self._gateway.base_url}/gateway/v1/chat/completions"
+        print(f"[LLM] POST {url} model={body['model']} project={BELFRY_PROJECT_ID}")
+        data = self._gateway.post_json("/gateway/v1/chat/completions", body)
+        result = ChatCompletion.from_dict(data)
+        return _GatewayCompletion(result.content, result.finish_reason, result.model)
+
+
+class _OfficialGatewayChat:
+    def __init__(self, completions):
+        self.completions = completions
+
+
+class _OfficialGatewayClient:
+    def __init__(self, completions):
+        self.chat = _OfficialGatewayChat(completions)
+
+
+def _direct_groq_client():
+    if not GROQ_API_KEY:
+        return None
+    return _GroqClient(OpenAI(
         base_url="https://api.groq.com/openai/v1",
         api_key=GROQ_API_KEY,
     ))
+
+
+_belfry_gateway = None
+if BELFRY_API_KEY and BELFRY_PROJECT_ID:
+    try:
+        from belfry_gateway import BelfryGateway
+
+        _belfry_gateway = BelfryGateway(
+            api_key=BELFRY_API_KEY,
+            base_url=BELFRY_BASE_URL,
+            timeout=45,
+        )
+    except Exception as exc:
+        print(f"[LLM] Belfry gateway SDK failed to load ({exc})")
+
+if _belfry_gateway is not None:
+    client = _OfficialGatewayClient(_OfficialGatewayCompletions(_belfry_gateway))
+    print(
+        f"[LLM] Belfry gateway SDK connected "
+        f"project={BELFRY_PROJECT_ID} model={MODEL_NAME}"
+    )
+elif LLM_PROVIDER in {"groq", "grok"}:
+    client = _direct_groq_client()
     print(f"[LLM] Connected to Groq Cloud API ({MODEL_NAME})")
 elif LLM_PROVIDER in {"lmstudio", "lm-studio", "llmstudio"}:
     client = _LocalClient(OpenAI(

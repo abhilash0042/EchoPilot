@@ -77,12 +77,14 @@ app = FastAPI(
 async def health_check():
     from urllib.parse import urlparse
     import belfry_client
+    from extraction import _belfry_gateway
     host = urlparse(belfry_client.BELFRY_BASE_URL).hostname or ""
     return {
         "status": "healthy",
         "stt_engines": list_stt_engines(),
         "belfry": {
             "sdk_connected": sdk_connected(),
+            "gateway_sdk": _belfry_gateway is not None,
             "host": host,
             "project_id": BELFRY_PROJECT_ID,
             "tenant_id": BELFRY_TENANT_ID,

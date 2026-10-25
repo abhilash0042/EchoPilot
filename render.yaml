@@ -10,15 +10,15 @@ services:
       - key: GROQ_API_KEY
         sync: false
       - key: LLM_MODEL
-        value: qwen/qwen3.8-27b
+        value: gemini-3.6-flash
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: BELFRY_BASE_URL
-        sync: false
+        value: https://app.belfrylabs.ai/api/v1
       - key: BELFRY_TENANT_ID
-        sync: false
+        value: tenant_63fb285afe99fd0d
       - key: BELFRY_PROJECT_ID
-        sync: false
+        value: proj_bf8aa49e70f6
       - key: BELFRY_API_KEY
         sync: false
       - key: BELFRY_DEMO_MODE

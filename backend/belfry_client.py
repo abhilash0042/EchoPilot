@@ -26,9 +26,9 @@ for _sdk_root in _SDK_CANDIDATES:
             sys.path.insert(0, _sdk_str)
         break
 
-BELFRY_BASE_URL = os.getenv("BELFRY_BASE_URL", "http://localhost:8001/api/v1").rstrip("/")
-BELFRY_TENANT_ID = os.getenv("BELFRY_TENANT_ID", "belfry-local")
-BELFRY_PROJECT_ID = os.getenv("BELFRY_PROJECT_ID", "proj_5e0b58be7d5a")
+BELFRY_BASE_URL = os.getenv("BELFRY_BASE_URL", "https://app.belfrylabs.ai/api/v1").rstrip("/")
+BELFRY_TENANT_ID = os.getenv("BELFRY_TENANT_ID", "tenant_63fb285afe99fd0d")
+BELFRY_PROJECT_ID = os.getenv("BELFRY_PROJECT_ID", "proj_bf8aa49e70f6")
 BELFRY_API_KEY = (os.getenv("BELFRY_API_KEY") or os.getenv("BELFRY_LABS_API_KEY", "")).strip()
 
 _sdk_client = None
